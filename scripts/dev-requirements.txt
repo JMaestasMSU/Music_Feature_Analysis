@@ -1,0 +1,7 @@
+pytest
+ruff
+mypy
+pre-commit
+requests
+joblib
+httpx

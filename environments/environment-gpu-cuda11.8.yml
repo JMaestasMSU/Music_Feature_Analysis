@@ -1,0 +1,22 @@
+name: mfa-gpu-cuda11-8
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pytorch=2.2
+  - torchvision=0.15
+  - torchaudio=2.2
+  - cudatoolkit=11.8
+  - numpy=1.26
+  - pandas=2.1
+  - scikit-learn=1.2
+  - librosa=0.10
+  - matplotlib=3.7
+  - seaborn=0.12
+  - umap-learn=0.5
+
+# To create the GPU environment (PowerShell):
+# conda env create -f environment-gpu-cuda11.8.yml
+# conda activate mfa-gpu-cuda11-8

@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  # FastAPI Backend (CPU - lightweight)
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+    container_name: music-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../data:/app/data:ro
+      - ../models/trained_models:/app/models/trained_models:ro
+    environment:
+      - MODEL_DIR=/app/models/trained_models
+      - LOG_LEVEL=info
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ML Model Server (GPU - heavy compute)
+  model-server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.model
+    container_name: music-model-server
+    ports:
+      - "8001:8001"
+    volumes:
+      - ../models/trained_models:/app/models/trained_models:ro
+    environment:
+      - MODEL_DIR=/app/models/trained_models
+      - DEVICE=cpu  # Change to 'cuda' if GPU available
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  default:
+    name: music-classification-network

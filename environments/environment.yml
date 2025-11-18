@@ -1,0 +1,29 @@
+name: music-feature-analysis
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.10
+  - numpy
+  - pandas
+  - scikit-learn
+  - librosa
+  - matplotlib
+  - seaborn
+  - umap-learn
+  - pip
+  - pip:
+    - torch
+
+# GPU notes:
+# - To enable GPU (NVIDIA), replace the 'pip: - torch' line above with the
+#   appropriate cudatoolkit and pytorch packages from the pytorch channel.
+# Example (for CUDA 11.8):
+# channels:
+#   - pytorch
+#   - conda-forge
+# dependencies:
+#   - python=3.10
+#   - pytorch=2.2 cudatoolkit=11.8 -c pytorch
+#   - torchvision -c pytorch
+#   - torchaudio -c pytorch
