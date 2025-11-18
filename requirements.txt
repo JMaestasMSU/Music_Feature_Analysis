@@ -1,0 +1,15 @@
+numpy
+pandas
+scikit-learn
+librosa
+matplotlib
+seaborn
+torch
+umap-learn
+fastapi
+uvicorn[standard]
+python-json-logger
+pydantic
+pydantic-settings
+prometheus-fastapi-instrumentator
+gunicorn

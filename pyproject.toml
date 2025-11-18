@@ -1,0 +1,28 @@
+[tool.ruff]
+line-length = 88
+select = ["E", "F", "W", "C90"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+[build-system]
+requires = ["setuptools>=42","wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "music_feature_analysis"
+version = "0.1.0"
+description = "Music feature extraction and genre classification (CS 3120 project)"
+authors = [ { name = "Jarred Maestas" } ]
+dependencies = [
+    "numpy",
+    "pandas",
+    "scikit-learn",
+    "librosa",
+    "matplotlib",
+    "seaborn",
+    "torch",
+    "umap-learn"
+    ,"fastapi"
+    ,"uvicorn[standard]"
+]
