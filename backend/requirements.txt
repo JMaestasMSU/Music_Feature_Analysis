@@ -1,0 +1,38 @@
+# Web Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# Audio Processing
+librosa==0.10.0
+soundfile==0.12.1
+scipy==1.11.4
+numpy==1.24.3
+
+# ML/Deep Learning
+torch==2.0.1
+torchvision==0.15.2
+
+# MATLAB Integration
+matlab-engine==23.2  # Optional: install via MATLAB
+
+# Data Processing
+pandas==2.1.1
+scikit-learn==1.3.2
+
+# Database (optional)
+sqlalchemy==2.0.23
+pydantic==2.4.2
+
+# Logging & Monitoring
+python-json-logger==2.0.7
+
+# Development
+pytest==7.4.3
+pytest-asyncio==0.21.1
+black==23.11.0
+flake8==6.1.0
+
+# Deployment
+gunicorn==21.2.0
+python-dotenv==1.0.0

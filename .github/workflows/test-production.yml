@@ -1,0 +1,123 @@
+name: Production Components Test
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'backend/**'
+      - 'models/**'
+      - 'tests/**'
+      - '.github/workflows/test-production.yml'
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-backend-api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python 3.9
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      
+      - name: Install backend dependencies
+        run: |
+          cd backend
+          pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Run backend tests
+        run: |
+          cd backend
+          python -m pytest test_api.py -v
+      
+      - name: Test API health endpoint
+        run: |
+          cd backend
+          python app.py &
+          sleep 5
+          curl -f http://localhost:8000/api/v1/health || exit 1
+
+  test-model-cpu:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python 3.9
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      
+      - name: Install model dependencies (CPU-only)
+        run: |
+          cd models
+          pip install --upgrade pip
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install numpy scipy librosa scikit-learn
+      
+      - name: Run CNN architecture test (CPU)
+        run: |
+          cd tests
+          python quick_cnn_test.py --cpu-only
+      
+      - name: Run audio processing test
+        run: |
+          cd tests
+          python quick_audio_processing_test.py
+
+  test-integration:
+    runs-on: ubuntu-latest
+    needs: [test-backend-api, test-model-cpu]
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python 3.9
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      
+      - name: Install all dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          cd backend && pip install -r requirements.txt
+      
+      - name: Run integration tests
+        run: |
+          cd tests
+          bash run_all_tests.sh --ci-mode
+
+  test-matlab-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python for NumPy FFT validation
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      
+      - name: Install dependencies
+        run: |
+          pip install numpy scipy matplotlib
+      
+      - name: Run Python FFT validation (MATLAB alternative)
+        run: |
+          cd tests
+          python quick_fft_test.py
+      
+      - name: Validate Parseval's theorem
+        run: |
+          cd tests
+          python -c "
+          import numpy as np
+          signal = np.random.randn(44100)
+          time_energy = np.sum(signal**2) / len(signal)
+          fft_mag = np.abs(np.fft.fft(signal))
+          freq_energy = np.sum(fft_mag**2) / len(signal)
+          error = abs(time_energy - freq_energy) / time_energy * 100
+          print(f'Parseval error: {error:.4f}%')
+          assert error < 1, 'FFT validation failed'
+          "

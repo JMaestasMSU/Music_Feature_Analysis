@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  # FastAPI Backend (CPU - lightweight)
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+    container_name: music_analysis_backend
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - LOG_LEVEL=INFO
+      - MODEL_SERVICE_URL=http://model-server:8001
+    volumes:
+      - ./backend/uploads:/app/backend/uploads
+      - ./backend/logs:/app/backend/logs
+    depends_on:
+      - model-server
+    networks:
+      - music_analysis_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ML Model Server (GPU - heavy compute)
+  model-server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.model
+    container_name: music_analysis_model_server
+    ports:
+      - "8001:8001"
+    environment:
+      - CUDA_VISIBLE_DEVICES=0  # GPU device
+      - ENVIRONMENT=production
+    volumes:
+      - ./models/trained_models:/app/models/trained_models
+      - ./models/cache:/app/models/cache
+    networks:
+      - music_analysis_net
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  music_analysis_net:
+    driver: bridge
+
+volumes:
+  backend_uploads:
+  backend_logs:
+  model_cache:
