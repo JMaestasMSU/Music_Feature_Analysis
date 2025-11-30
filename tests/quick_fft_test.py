@@ -27,7 +27,7 @@ def test_parseval_theorem(verbose=True):
         test_signal = np.sin(2 * np.pi * 440 * t) + 0.5 * np.sin(2 * np.pi * 880 * t)
         
         # Time-domain energy
-        time_energy = np.sum(test_signal**2) / len(test_signal)
+        time_energy = np.sum(test_signal**2)
         
         # Frequency-domain energy
         fft_mag = np.abs(np.fft.fft(test_signal))

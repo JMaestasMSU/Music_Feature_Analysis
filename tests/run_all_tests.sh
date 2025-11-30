@@ -3,7 +3,7 @@
 # Music Feature Analysis - Quick Test Suite
 # Runs all component tests in < 2 minutes
 
-set -e  # Exit on error
+# set -e  # Exit on error (DISABLED to allow all tests to run)
 
 # Colors for output
 RED='\033[0;31m'
@@ -104,7 +104,7 @@ echo ""
 if [ $TESTS_FAILED -eq 0 ]; then
     echo -e "${GREEN}All tests passed!${NC}"
     exit 0
-else:
+else
     echo -e "${RED}Some tests failed!${NC}"
     exit 1
 fi

@@ -114,9 +114,9 @@ jobs:
           python -c "
           import numpy as np
           signal = np.random.randn(44100)
-          time_energy = np.sum(signal**2) / len(signal)
+          time_energy = np.sum(signal**2)
           fft_mag = np.abs(np.fft.fft(signal))
-          freq_energy = np.sum(fft_mag**2) / len(signal)
+          freq_energy = np.sum((fft_mag**2)) / len(signal)
           error = abs(time_energy - freq_energy) / time_energy * 100
           print(f'Parseval error: {error:.4f}%')
           assert error < 1, 'FFT validation failed'

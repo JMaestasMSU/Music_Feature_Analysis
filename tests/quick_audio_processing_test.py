@@ -25,6 +25,11 @@ def generate_synthetic_audio(duration=1.0, sr=22050):
         0.1 * np.random.randn(len(t))         # Noise
     )
     
+    # Normalize audio to [-1, 1]
+    max_abs = np.max(np.abs(audio))
+    if max_abs > 0:
+        audio = audio / max_abs
+
     return audio, sr
 
 def compute_mfcc(audio, sr, n_mfcc=13):
@@ -51,7 +56,7 @@ def test_audio_generation(verbose=True):
         
         assert len(audio) > 0, "Audio is empty"
         assert sr == 22050, f"Expected sr=22050, got {sr}"
-        assert -1 <= audio.min() <= audio.max() <= 1.5, "Audio values out of range"
+        assert -1.0 <= audio.min() <= audio.max() <= 1.0, "Audio values out of range"
         
         if verbose:
             print(f"[OK] PASSED (length: {len(audio)} samples)")
