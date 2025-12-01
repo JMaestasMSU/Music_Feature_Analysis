@@ -1,118 +1,398 @@
-from fastapi import FastAPI
+"""
+Production FastAPI Backend for Music Genre Classification
+Handles audio file uploads, feature extraction, and genre prediction.
+"""
+
+import sys
+from pathlib import Path
+from typing import List, Optional, Dict, Any, cast
+import tempfile
+import os
+
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-import logging
-from pathlib import Path
-from datetime import datetime
+from pydantic import BaseModel, Field
+import uvicorn
+import numpy as np
 
-from config import current_config
-from routes import analysis, health
+# Add parent directory for imports
+sys.path.append(str(Path(__file__).parent.parent))
 
-# Configure logging
-logging.basicConfig(
-    level=getattr(logging, current_config.LOG_LEVEL),
-    format=current_config.LOG_FORMAT,
-    handlers=[
-        logging.FileHandler(current_config.LOGS_DIR / "app.log"),
-        logging.StreamHandler()
-    ]
-)
+from preprocessing.feature_extraction import extract_features, features_to_array
+from models.genre_classifier import GenreClassifier, ModelWrapper
+from models.model_utils import load_production_model
 
-logger = logging.getLogger(__name__)
 
-# Initialize FastAPI app
+# ============================================================================
+# Configuration
+# ============================================================================
+
+class Config:
+    """Application configuration."""
+    APP_NAME = "Music Genre Classification API"
+    VERSION = "1.0.0"
+    MODEL_DIR = "../models/trained_models"
+    MODEL_NAME = "genre_classifier_production"
+    MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+    ALLOWED_EXTENSIONS = {".mp3", ".wav", ".au", ".flac", ".ogg"}
+
+
+config = Config()
+
+
+# ============================================================================
+# Pydantic Models (Request/Response Schemas)
+# ============================================================================
+
+class PredictionRequest(BaseModel):
+    """Request model for direct feature prediction."""
+    features: List[float] = Field(..., min_length=20, max_length=20)
+    return_probs: bool = False
+    top_k: int = Field(default=3, ge=1, le=8)
+
+
+class TopPrediction(BaseModel):
+    """Single top prediction."""
+    genre: str
+    confidence: float
+
+
+class PredictionResponse(BaseModel):
+    """Response model for predictions."""
+    predicted_genre: str
+    confidence: float
+    top_predictions: List[TopPrediction]
+    all_probabilities: Optional[Dict[str, float]] = None
+
+
+class HealthResponse(BaseModel):
+    """Health check response."""
+    status: str
+    app_name: str
+    version: str
+    model_loaded: bool
+    device: str
+
+
+class AudioAnalysisResponse(BaseModel):
+    """Response for audio file analysis."""
+    filename: str
+    duration: float
+    features: Dict[str, Any]
+    prediction: PredictionResponse
+
+
+# ============================================================================
+# FastAPI Application
+# ============================================================================
+
 app = FastAPI(
-    title=current_config.API_TITLE,
-    description=current_config.API_DESCRIPTION,
-    version=current_config.API_VERSION,
+    title=config.APP_NAME,
+    version=config.VERSION,
+    description="REST API for music genre classification using neural networks",
     docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json"
+    redoc_url="/redoc"
 )
 
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=current_config.ALLOWED_ORIGINS,
+    allow_origins=["*"],  # In production, specify actual origins
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Request/Response logging middleware
-@app.middleware("http")
-async def log_requests(request, call_next):
-    """Log all incoming requests"""
-    logger.info(f"{request.method} {request.url.path}")
-    
-    response = await call_next(request)
-    
-    logger.info(f"Response: {response.status_code}")
-    return response
+
+# ============================================================================
+# Global State
+# ============================================================================
+
+model_wrapper: Optional[ModelWrapper] = None
 
 
-# Exception handlers
-@app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
-    """Global exception handler"""
-    logger.error(f"Unhandled exception: {exc}")
-    return JSONResponse(
-        status_code=500,
-        content={
-            'error': str(exc),
-            'timestamp': datetime.now().isoformat()
-        }
-    )
-
-
-# Include routers
-app.include_router(health.router)
-app.include_router(analysis.router)
-
-
-@app.get("/")
-async def root() -> dict:
-    """Root endpoint with API information"""
-    return {
-        'name': current_config.API_TITLE,
-        'version': current_config.API_VERSION,
-        'description': current_config.API_DESCRIPTION,
-        'docs': '/docs',
-        'redoc': '/redoc',
-        'endpoints': {
-            'health': '/api/v1/health',
-            'upload_and_analyze': 'POST /api/v1/analysis/upload',
-            'quick_predict': 'POST /api/v1/analysis/predict',
-            'batch_analyze': 'POST /api/v1/analysis/batch-analyze',
-            'feature_comparison': 'POST /api/v1/analysis/compare-features'
-        }
-    }
-
+# ============================================================================
+# Startup/Shutdown Events
+# ============================================================================
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize application on startup"""
-    logger.info("=" * 70)
-    logger.info("Starting Music Feature Analysis API")
-    logger.info(f"Environment: {current_config.__class__.__name__}")
-    logger.info(f"Upload directory: {current_config.UPLOAD_DIR}")
-    logger.info(f"Logs directory: {current_config.LOGS_DIR}")
-    logger.info(f"MATLAB integration: {'Enabled' if current_config.RUN_MATLAB_ANALYSIS else 'Disabled'}")
-    logger.info("=" * 70)
+    """Load model on startup."""
+    global model_wrapper
+    
+    print(f"Starting {config.APP_NAME} v{config.VERSION}")
+    print(f"Loading model from {config.MODEL_DIR}/{config.MODEL_NAME}")
+    
+    try:
+        # Try loading production model
+        loaded_model, scaler, genre_names, metadata = load_production_model(
+            model_class=GenreClassifier,
+            model_dir=config.MODEL_DIR,
+            model_name=config.MODEL_NAME,
+            device='cpu'
+        )
+        model = cast(GenreClassifier, loaded_model)
+        
+        model_wrapper = ModelWrapper(
+            model=model,
+            scaler=scaler,
+            genre_names=genre_names,
+            device='cpu'
+        )
+        
+        print(f"✓ Model loaded successfully")
+        print(f"  Genres: {genre_names}")
+        print(f"  Metrics: {metadata.get('metrics', {})}")
+        
+    except Exception as e:
+        print(f"⚠️  Warning: Could not load production model: {e}")
+        print(f"   Loading fallback untrained model for development")
+        
+        # Fallback to untrained model
+        model = GenreClassifier(input_dim=20, num_classes=8)
+        genre_names = ['Rock', 'Electronic', 'Hip-Hop', 'Classical', 
+                      'Jazz', 'Folk', 'Pop', 'Experimental']
+        
+        model_wrapper = ModelWrapper(
+            model=model,
+            scaler=None,
+            genre_names=genre_names,
+            device='cpu'
+        )
+        
+        print(f"⚠️  Using untrained model - predictions will be random!")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Cleanup on shutdown"""
-    logger.info("Shutting down Music Feature Analysis API")
+    """Cleanup on shutdown."""
+    print(f"Shutting down {config.APP_NAME}")
 
+
+# ============================================================================
+# API Endpoints
+# ============================================================================
+
+@app.get("/", tags=["Root"])
+async def root():
+    """Root endpoint with API information."""
+    return {
+        "message": f"Welcome to {config.APP_NAME}",
+        "version": config.VERSION,
+        "docs": "/docs",
+        "health": "/health"
+    }
+
+
+@app.get("/health", response_model=HealthResponse, tags=["Health"])
+async def health_check():
+    """Health check endpoint."""
+    return HealthResponse(
+        status="healthy" if model_wrapper is not None else "unhealthy",
+        app_name=config.APP_NAME,
+        version=config.VERSION,
+        model_loaded=model_wrapper is not None,
+        device=model_wrapper.device if model_wrapper else "unknown"
+    )
+
+
+@app.post("/predict", response_model=PredictionResponse, tags=["Prediction"])
+async def predict_from_features(request: PredictionRequest):
+    """
+    Predict genre from pre-extracted features.
+    
+    Args:
+        request: PredictionRequest with 20 audio features
+    
+    Returns:
+        PredictionResponse with genre prediction and confidence
+    """
+    if model_wrapper is None:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+    
+    try:
+        # Convert to numpy array
+        features = np.array(request.features)
+        
+        # Predict
+        result = model_wrapper.predict(
+            features=features,
+            return_probs=request.return_probs,
+            top_k=request.top_k
+        )
+        
+        return PredictionResponse(**result)
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
+
+
+@app.post("/analyze-audio", response_model=AudioAnalysisResponse, tags=["Audio Analysis"])
+async def analyze_audio_file(
+    file: UploadFile = File(...),
+    return_probs: bool = False,
+    top_k: int = 3
+):
+    """
+    Analyze uploaded audio file and predict genre.
+    
+    Args:
+        file: Audio file (mp3, wav, au, flac, ogg)
+        return_probs: Whether to return all genre probabilities
+        top_k: Number of top predictions to return
+    
+    Returns:
+        AudioAnalysisResponse with features and prediction
+    """
+    if model_wrapper is None:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+    
+    # Validate file extension
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No filename provided")
+    file_ext = Path(file.filename).suffix.lower()
+    if file_ext not in config.ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File type {file_ext} not supported. Allowed: {config.ALLOWED_EXTENSIONS}"
+        )
+    
+    # Validate file size
+    file_content = await file.read()
+    if len(file_content) > config.MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Max size: {config.MAX_FILE_SIZE / 1024 / 1024} MB"
+        )
+    
+    # Save to temporary file
+    try:
+        with tempfile.NamedTemporaryFile(suffix=file_ext, delete=False) as tmp:
+            tmp.write(file_content)
+            tmp_path = tmp.name
+        
+        # Extract features
+        features_dict = extract_features(tmp_path, sr=22050, duration=30.0)
+        
+        if features_dict is None:
+            raise HTTPException(status_code=500, detail="Feature extraction failed")
+        
+        # Convert to array
+        feature_array = features_to_array(features_dict)
+        
+        # Predict
+        prediction_result = model_wrapper.predict(
+            features=feature_array,
+            return_probs=return_probs,
+            top_k=top_k
+        )
+        
+        # Clean up
+        os.unlink(tmp_path)
+        
+        return AudioAnalysisResponse(
+            filename=file.filename,
+            duration=features_dict.get('duration', 30.0),
+            features=features_dict,
+            prediction=PredictionResponse(**prediction_result)
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Clean up temp file if it exists
+        if 'tmp_path' in locals():
+            try:
+                os.unlink(tmp_path)
+            except:
+                pass
+        raise HTTPException(status_code=500, detail=f"Audio analysis failed: {str(e)}")
+
+
+@app.post("/batch-predict", tags=["Batch Operations"])
+async def batch_predict(requests: List[PredictionRequest]):
+    """
+    Batch prediction for multiple feature sets.
+    
+    Args:
+        requests: List of PredictionRequest objects
+    
+    Returns:
+        List of PredictionResponse objects
+    """
+    if model_wrapper is None:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+    
+    if len(requests) > 100:
+        raise HTTPException(status_code=400, detail="Batch size limited to 100")
+    
+    try:
+        results = []
+        for req in requests:
+            features = np.array(req.features)
+            result = model_wrapper.predict(
+                features=features,
+                return_probs=req.return_probs,
+                top_k=req.top_k
+            )
+            results.append(PredictionResponse(**result))
+        
+        return results
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Batch prediction failed: {str(e)}")
+
+
+@app.get("/genres", tags=["Model"])
+async def get_genres():
+    """Get list of supported genres."""
+    if model_wrapper is None:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+    
+    return {
+        "genres": model_wrapper.genre_names,
+        "count": len(model_wrapper.genre_names)
+    }
+
+
+@app.get("/model/info", tags=["Model"])
+async def get_model_info():
+    """Get information about loaded model."""
+    if model_wrapper is None:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+    
+    return {
+        'status': 'loaded',
+        'device': model_wrapper.device,
+        'num_classes': len(model_wrapper.genre_names),
+        'genre_names': model_wrapper.genre_names,
+        'input_features': model_wrapper.model.input_dim if hasattr(model_wrapper.model, 'input_dim') else 20,
+    }
+
+
+# ============================================================================
+# Main Entry Point
+# ============================================================================
 
 if __name__ == "__main__":
-    import uvicorn
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Music Genre Classification API Server")
+    parser.add_argument("--host", default="0.0.0.0", help="Host to bind to")
+    parser.add_argument("--port", type=int, default=8000, help="Port to bind to")
+    parser.add_argument("--reload", action="store_true", help="Enable auto-reload")
+    
+    args = parser.parse_args()
+    
+    print(f"\nStarting {config.APP_NAME} v{config.VERSION}")
+    print(f"API Documentation: http://{args.host}:{args.port}/docs")
+    print(f"Health Check: http://{args.host}:{args.port}/health\n")
     
     uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=8000,
-        log_level=current_config.LOG_LEVEL.lower()
+        "app:app",
+        host=args.host,
+        port=args.port,
+        reload=args.reload,
+        log_level="info"
     )

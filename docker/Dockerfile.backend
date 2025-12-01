@@ -1,5 +1,9 @@
 FROM python:3.11-slim
 
+LABEL maintainer="Jarred Maestas"
+LABEL description="Music Genre Classification Backend API"
+
+# Set working directory
 WORKDIR /app
 
 # Install system dependencies
@@ -8,22 +12,21 @@ RUN apt-get update && apt-get install -y \
     libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy backend requirements
-COPY backend/requirements.txt .
-
-# Install Python dependencies
+# Copy requirements first (for caching)
+COPY backend/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy backend code
+# Copy application code
 COPY backend/ /app/backend/
-COPY matlab/ /app/matlab/
+COPY preprocessing/ /app/preprocessing/
+COPY models/ /app/models/
 
 # Expose port
 EXPOSE 8000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/api/v1/health || exit 1
+  CMD python -c "import requests; requests.get('http://localhost:8000/health')"
 
-# Run API
-CMD ["python", "-m", "uvicorn", "backend.app:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run application
+CMD ["uvicorn", "backend.app:app", "--host", "0.0.0.0", "--port", "8000"]

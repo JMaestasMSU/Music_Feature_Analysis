@@ -1,27 +1,29 @@
-FROM pytorch/pytorch:2.0.1-cuda12.1-runtime-ubuntu22.04
+FROM python:3.11-slim
+
+LABEL maintainer="Jarred Maestas"
+LABEL description="Music Genre Classification Model Inference Server"
 
 WORKDIR /app
 
-# Install system dependencies
+# Install dependencies
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libsndfile1 \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy ML requirements
-COPY models/app/requirements.txt /tmp/
-RUN pip install --no-cache-dir -r /tmp/requirements.txt
+# Copy requirements
+COPY app/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy model code and trained weights
-COPY models/app/ /app/models/
-COPY models/trained_models/ /app/models/trained_models/
+# Copy application
+COPY app/ /app/app/
+COPY models/ /app/models/
+COPY preprocessing/ /app/preprocessing/
 
 EXPOSE 8001
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8001/health || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD python -c "import requests; requests.get('http://localhost:8001/health')"
 
-# Run model server
-CMD ["python", "-m", "uvicorn", "models.app.server:app", "--host", "0.0.0.0", "--port", "8001"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]

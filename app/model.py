@@ -160,7 +160,7 @@ class ModelService:
             'device': self._model_wrapper.device,
             'num_classes': len(self._model_wrapper.genre_names),
             'genre_names': self._model_wrapper.genre_names,
-            'input_features': self._model_wrapper.model.input_dim,
+            'input_features': self._model_wrapper.model.input_dim if hasattr(self._model_wrapper.model, 'input_dim') else 20,
         }
     
     @property

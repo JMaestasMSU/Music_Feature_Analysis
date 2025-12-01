@@ -1,13 +1,13 @@
 """
-Production-ready genre classification model.
-Fully connected neural network for music genre classification from audio features.
+Genre classification neural network model.
+Includes model definition, wrapper for inference, and utilities.
 """
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from typing import Dict, List, Optional, Tuple
 import numpy as np
+from typing import Dict, List, Optional, Tuple
+from sklearn.preprocessing import StandardScaler
 
 
 class GenreClassifier(nn.Module):
@@ -15,170 +15,67 @@ class GenreClassifier(nn.Module):
     Fully connected neural network for music genre classification.
     
     Architecture:
-        Input (20 features) → FC(128) → ReLU → Dropout(0.3) →
+        Input → FC(128) → ReLU → Dropout(0.3) →
         FC(64) → ReLU → Dropout(0.3) →
         FC(32) → ReLU →
-        FC(8 genres) → Softmax
-    
-    Args:
-        input_dim (int): Number of input features (default: 20)
-        hidden_dims (List[int]): Hidden layer dimensions (default: [128, 64, 32])
-        num_classes (int): Number of output classes (default: 8)
-        dropout (float): Dropout probability (default: 0.3)
+        FC(num_classes) → Output
     """
     
-    def __init__(
-        self,
-        input_dim: int = 20,
-        hidden_dims: Optional[List[int]] = None,
-        num_classes: int = 8,
-        dropout: float = 0.3
-    ):
+    def __init__(self, input_dim: int = 20, num_classes: int = 8, dropout: float = 0.3):
         super(GenreClassifier, self).__init__()
         
-        if hidden_dims is None:
-            hidden_dims = [128, 64, 32]
-        
         self.input_dim = input_dim
-        self.hidden_dims = hidden_dims
         self.num_classes = num_classes
-        self.dropout_prob = dropout
         
-        # Build layers dynamically
-        layers = []
-        prev_dim = input_dim
+        # Layers
+        self.fc1 = nn.Linear(input_dim, 128)
+        self.fc2 = nn.Linear(128, 64)
+        self.fc3 = nn.Linear(64, 32)
+        self.fc4 = nn.Linear(32, num_classes)
         
-        for i, hidden_dim in enumerate(hidden_dims):
-            layers.append(nn.Linear(prev_dim, hidden_dim))
-            layers.append(nn.ReLU())
-            
-            # Add dropout except for last hidden layer
-            if i < len(hidden_dims) - 1:
-                layers.append(nn.Dropout(dropout))
-            
-            prev_dim = hidden_dim
+        self.dropout = nn.Dropout(dropout)
+        self.relu = nn.ReLU()
         
-        # Output layer
-        layers.append(nn.Linear(prev_dim, num_classes))
+    def forward(self, x):
+        """Forward pass through network."""
+        x = self.relu(self.fc1(x))
+        x = self.dropout(x)
         
-        self.network = nn.Sequential(*layers)
+        x = self.relu(self.fc2(x))
+        x = self.dropout(x)
         
-        # Initialize weights
-        self._initialize_weights()
+        x = self.relu(self.fc3(x))
+        
+        x = self.fc4(x)  # No activation (use with CrossEntropyLoss)
+        
+        return x
     
-    def _initialize_weights(self):
-        """Initialize network weights using Xavier/Glorot initialization."""
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
-    
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass through the network.
-        
-        Args:
-            x (torch.Tensor): Input features of shape (batch_size, input_dim)
-        
-        Returns:
-            torch.Tensor: Logits of shape (batch_size, num_classes)
-        """
-        return self.network(x)
-    
-    def predict_proba(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Get class probabilities using softmax.
-        
-        Args:
-            x (torch.Tensor): Input features of shape (batch_size, input_dim)
-        
-        Returns:
-            torch.Tensor: Probabilities of shape (batch_size, num_classes)
-        """
-        logits = self.forward(x)
-        return F.softmax(logits, dim=1)
-    
-    def predict(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Get predicted class labels.
-        
-        Args:
-            x (torch.Tensor): Input features of shape (batch_size, input_dim)
-        
-        Returns:
-            torch.Tensor: Predicted class indices of shape (batch_size,)
-        """
-        probs = self.predict_proba(x)
-        return torch.argmax(probs, dim=1)
-    
-    def get_config(self) -> Dict:
-        """Get model configuration for serialization."""
-        return {
-            'input_dim': self.input_dim,
-            'hidden_dims': self.hidden_dims,
-            'num_classes': self.num_classes,
-            'dropout': self.dropout_prob
-        }
-    
-    @classmethod
-    def from_config(cls, config: Dict) -> 'GenreClassifier':
-        """Create model from configuration dictionary."""
-        return cls(**config)
+    def predict_proba(self, x):
+        """Get probability predictions."""
+        with torch.no_grad():
+            logits = self.forward(x)
+            probs = torch.softmax(logits, dim=1)
+        return probs
 
 
 class ModelWrapper:
     """
-    Wrapper for production model with preprocessing and postprocessing.
-    Handles feature scaling, prediction, and result formatting.
+    Wrapper for model inference with preprocessing.
+    Handles feature scaling, prediction, and post-processing.
     """
     
     def __init__(
         self,
         model: GenreClassifier,
-        scaler: Optional[object] = None,
+        scaler: Optional[StandardScaler] = None,
         genre_names: Optional[List[str]] = None,
         device: str = 'cpu'
     ):
-        """
-        Initialize model wrapper.
-        
-        Args:
-            model: Trained GenreClassifier model
-            scaler: sklearn StandardScaler for feature normalization
-            genre_names: List of genre names for label decoding
-            device: Device to run inference on ('cpu' or 'cuda')
-        """
         self.model = model.to(device)
         self.model.eval()
         self.scaler = scaler
-        self.genre_names = genre_names or [
-            'Rock', 'Electronic', 'Hip-Hop', 'Classical', 
-            'Jazz', 'Folk', 'Pop', 'Experimental'
-        ]
+        self.genre_names = genre_names or [f'Genre_{i}' for i in range(model.num_classes)]
         self.device = device
-    
-    def preprocess(self, features: np.ndarray) -> torch.Tensor:
-        """
-        Preprocess features before model inference.
-        
-        Args:
-            features: Raw features of shape (batch_size, n_features) or (n_features,)
-        
-        Returns:
-            Preprocessed features as torch tensor
-        """
-        # Ensure 2D array
-        if features.ndim == 1:
-            features = features.reshape(1, -1)
-        
-        # Scale features if scaler is available
-        if self.scaler is not None:
-            features = self.scaler.transform(features)
-        
-        # Convert to tensor
-        tensor = torch.FloatTensor(features).to(self.device)
-        return tensor
     
     def predict(
         self,
@@ -190,133 +87,85 @@ class ModelWrapper:
         Predict genre for given features.
         
         Args:
-            features: Input features (batch_size, n_features) or (n_features,)
+            features: Input features (n_features,) or (batch_size, n_features)
             return_probs: Whether to return all class probabilities
             top_k: Number of top predictions to return
         
         Returns:
             Dictionary with prediction results
         """
+        # Handle single sample
+        if features.ndim == 1:
+            features = features.reshape(1, -1)
+        
+        # Scale features
+        if self.scaler is not None:
+            features = self.scaler.transform(features)
+        
+        # Convert to tensor
+        features_tensor = torch.FloatTensor(features).to(self.device)
+        
+        # Predict
         with torch.no_grad():
-            # Preprocess
-            x = self.preprocess(features)
-            
-            # Get probabilities
-            probs = self.model.predict_proba(x)
-            probs_np = probs.cpu().numpy()
-            
-            # Get top-k predictions
-            top_k = min(top_k, len(self.genre_names))
-            top_indices = np.argsort(probs_np[0])[::-1][:top_k]
-            top_probs = probs_np[0][top_indices]
-            
-            # Format results
-            results = {
-                'predicted_genre': self.genre_names[top_indices[0]],
-                'predicted_index': int(top_indices[0]),
-                'confidence': float(top_probs[0]),
-                'top_predictions': [
-                    {
-                        'genre': self.genre_names[idx],
-                        'confidence': float(prob)
-                    }
-                    for idx, prob in zip(top_indices, top_probs)
-                ]
+            logits = self.model(features_tensor)
+            probs = torch.softmax(logits, dim=1)
+        
+        probs_np = probs.cpu().numpy()[0]
+        
+        # Get top predictions
+        top_indices = np.argsort(probs_np)[-top_k:][::-1]
+        top_predictions = [
+            {
+                'genre': self.genre_names[idx],
+                'confidence': float(probs_np[idx])
             }
-            
-            if return_probs:
-                results['all_probabilities'] = {
-                    genre: float(prob)
-                    for genre, prob in zip(self.genre_names, probs_np[0])
-                }
-            
-            return results
+            for idx in top_indices
+        ]
+        
+        result = {
+            'predicted_genre': self.genre_names[top_indices[0]],
+            'confidence': float(probs_np[top_indices[0]]),
+            'top_predictions': top_predictions
+        }
+        
+        if return_probs:
+            result['all_probabilities'] = {
+                genre: float(prob)
+                for genre, prob in zip(self.genre_names, probs_np)
+            }
+        
+        return result
     
     def predict_batch(
         self,
         features_list: List[np.ndarray],
         return_probs: bool = False
     ) -> List[Dict]:
-        """
-        Predict genres for batch of features.
-        
-        Args:
-            features_list: List of feature arrays
-            return_probs: Whether to return all class probabilities
-        
-        Returns:
-            List of prediction dictionaries
-        """
-        # Stack features
-        features_batch = np.vstack(features_list)
-        
-        with torch.no_grad():
-            x = self.preprocess(features_batch)
-            probs = self.model.predict_proba(x)
-            probs_np = probs.cpu().numpy()
-            
-            results = []
-            for i in range(len(features_list)):
-                pred_idx = np.argmax(probs_np[i])
-                result = {
-                    'predicted_genre': self.genre_names[pred_idx],
-                    'predicted_index': int(pred_idx),
-                    'confidence': float(probs_np[i, pred_idx])
-                }
-                
-                if return_probs:
-                    result['all_probabilities'] = {
-                        genre: float(prob)
-                        for genre, prob in zip(self.genre_names, probs_np[i])
-                    }
-                
-                results.append(result)
-            
-            return results
-
-
-def create_model(
-    input_dim: int = 20,
-    num_classes: int = 8,
-    hidden_dims: Optional[List[int]] = None,
-    dropout: float = 0.3
-) -> GenreClassifier:
-    """
-    Factory function to create a GenreClassifier model.
-    
-    Args:
-        input_dim: Number of input features
-        num_classes: Number of output classes
-        hidden_dims: List of hidden layer dimensions
-        dropout: Dropout probability
-    
-    Returns:
-        Initialized GenreClassifier model
-    """
-    return GenreClassifier(
-        input_dim=input_dim,
-        hidden_dims=hidden_dims,
-        num_classes=num_classes,
-        dropout=dropout
-    )
+        """Predict genres for batch of features."""
+        return [
+            self.predict(features, return_probs=return_probs)
+            for features in features_list
+        ]
 
 
 if __name__ == '__main__':
-    # Test model creation
-    model = create_model()
-    print(f"Model created: {model}")
-    print(f"Total parameters: {sum(p.numel() for p in model.parameters()):,}")
+    # Test model
+    print("Testing GenreClassifier...")
+    
+    model = GenreClassifier(input_dim=20, num_classes=8)
+    print(f"Model created: {sum(p.numel() for p in model.parameters())} parameters")
     
     # Test forward pass
-    batch_size = 4
-    x = torch.randn(batch_size, 20)
-    output = model(x)
-    print(f"Input shape: {x.shape}")
-    print(f"Output shape: {output.shape}")
+    test_input = torch.randn(2, 20)
+    output = model(test_input)
+    print(f"Forward pass: {test_input.shape} → {output.shape}")
     
-    # Test prediction
-    probs = model.predict_proba(x)
-    preds = model.predict(x)
-    print(f"Probabilities shape: {probs.shape}")
-    print(f"Predictions shape: {preds.shape}")
-    print(f"Predictions: {preds}")
+    # Test wrapper
+    wrapper = ModelWrapper(model, genre_names=['Rock', 'Pop', 'Jazz', 'Classical', 'Electronic', 'Hip-Hop', 'Folk', 'Experimental'])
+    test_features = np.random.randn(20)
+    result = wrapper.predict(test_features, return_probs=True, top_k=3)
+    
+    print(f"\nPrediction result:")
+    print(f"  Predicted genre: {result['predicted_genre']}")
+    print(f"  Confidence: {result['confidence']:.4f}")
+    print(f"  Top 3: {[p['genre'] for p in result['top_predictions']]}")

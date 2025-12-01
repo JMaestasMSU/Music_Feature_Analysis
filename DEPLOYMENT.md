@@ -1,418 +1,251 @@
-# Deployment Guide
+# Deployment Guide - Music Genre Classification System
 
-This document explains how to run and deploy the Music Feature Analysis system.
-
----
-
-## For Grading (View Deliverables Only)
-
-If you're here to **grade the project**, follow these steps:
-
-### 1. View Deliverable Notebooks
-
-```bash
-# Open EDA notebook
-jupyter notebook notebooks/01_EDA.ipynb
-
-# Open Modeling notebook
-jupyter notebook notebooks/02_Modeling.ipynb
-```
-
-**Grading Rubric**: See [README.md](README.md) for point breakdown
-
-### 2. View Presentation
-
-```bash
-# Open presentation PDF
-open presentation/presentation.pdf
-
-# Read summary documentation
-cat presentation/SUMMARY.md
-```
-
-### 3. Run Quick Tests (Optional - Proves Components Work)
-
-```bash
-cd tests/
-bash run_all_tests.sh
-```
-
-Takes < 2 minutes. Shows:
-- FFT spectral analysis works
-- Audio features extract correctly
-- CNN architecture trains
-- Bayesian optimization searches
-
-**No grading required for tests**, but demonstrates system integrity.
+This guide covers deploying the music genre classification system in various environments.
 
 ---
 
-## For Development (Run the System)
+## Local Development Deployment
 
-### Prerequisites
+### 1. Start Backend API
 
+**macOS/Linux:**
 ```bash
-# Python 3.9+
-python --version
+cd backend/
+python app.py
 
-# pip
-pip --version
+# API runs at: http://localhost:8000
+# Docs: http://localhost:8000/docs
 ```
 
-### Option 1: Backend Only (Lightweight, No GPU)
-
-```bash
+**Windows:**
+```powershell
 cd backend
-pip install -r requirements.txt
 python app.py
 ```
 
-**Access**:
-- API: http://localhost:8000
-- Swagger UI: http://localhost:8000/docs
-- Health: http://localhost:8000/api/v1/health
-
-**Limitations**: 
-- Model predictions use dummy model (no real inference)
-- Good for testing API structure
-
-### Option 2: Full Stack (Requires Docker)
+### 2. Start Model Inference Server (Optional)
 
 ```bash
-cd docker
-docker-compose up -d
+cd app/
+python main.py
+
+# API runs at: http://localhost:8001
 ```
 
-**Services**:
-- Backend: http://localhost:8000
-- Model Server: http://localhost:8001
-- Combined: Full end-to-end system
-
-**Monitor**:
-```bash
-docker-compose logs -f
-docker ps
-```
-
-**Stop**:
-```bash
-docker-compose down
-```
-
-### Option 3: Development with GPU (Docker + NVIDIA)
-
-```bash
-# Requires NVIDIA Docker runtime installed
-cd docker
-docker-compose up -d
-
-# Verify GPU
-docker exec music_analysis_model_server nvidia-smi
-```
-
----
-
-## Configuration
-
-### Backend Configuration
-
-Edit `backend/.env`:
-
-```bash
-ENVIRONMENT=development
-LOG_LEVEL=INFO
-SAMPLE_RATE=44100
-N_MELS=128
-ENABLE_CACHING=true
-MAX_FILE_SIZE=52428800
-```
-
-### Docker Configuration
-
-Edit `docker/docker-compose.yml`:
-
-```yaml
-services:
-  backend:
-    ports:
-      - "8000:8000"  # Change port here
-    environment:
-      - ENVIRONMENT=production
-```
-
----
-
-## Testing
-
-### Quick Component Tests
-
-```bash
-cd tests/
-bash run_all_tests.sh
-```
-
-**Output**: if all pass, if any fail
-
-### Test API Endpoints
-
-```bash
-cd backend
-python test_api.py
-```
-
-**Tests**:
-- Backend health check
-- Model server health check
-- API endpoints
-- Synthetic predictions
-
-### Manual API Testing
+### 3. Test API
 
 ```bash
 # Health check
-curl http://localhost:8000/api/v1/health
+curl http://localhost:8000/health
 
-# Get features
-curl http://localhost:8000/api/v1/analysis/features
-
-# Get FFT info
-curl http://localhost:8000/api/v1/analysis/fft-validation
+# Test prediction
+python backend/test_api.py
 ```
 
 ---
 
 ## Docker Deployment
 
-### Build Containers
+### 1. Build Containers
 
 ```bash
-cd docker
-
-# Build backend
-docker build -f Dockerfile.backend -t music-backend .
-
-# Build model server
-docker build -f Dockerfile.model -t music-model .
+cd docker/
+docker-compose build
 ```
 
-### Run with Docker Compose
+### 2. Start Services
 
 ```bash
-# Start all services
 docker-compose up -d
+```
 
-# View logs
-docker-compose logs -f
+### 3. Verify Running
 
-# Check status
+```bash
 docker-compose ps
-
-# Stop services
-docker-compose down -v
+docker-compose logs -f backend
 ```
 
-### Push to Registry (Production)
+### 4. Test Endpoints
 
 ```bash
-# Tag images
-docker tag music-backend:latest myregistry/music-backend:latest
-docker tag music-model:latest myregistry/music-model:latest
+curl http://localhost:8000/health
+curl http://localhost:8001/health
+```
 
-# Push
-docker push myregistry/music-backend:latest
-docker push myregistry/music-model:latest
+### 5. Stop Services
+
+```bash
+docker-compose down
 ```
 
 ---
 
-## Kubernetes Deployment (Production)
+## Production Deployment (Kubernetes)
 
-### Prerequisites
-
-```bash
-kubectl version
-helm version
-```
-
-### Deploy
-
-```bash
-cd kubernetes
-
-# Create namespace
-kubectl create namespace music-analysis
-
-# Create ConfigMap
-kubectl apply -f configmap.yaml -n music-analysis
-
-# Deploy backend
-kubectl apply -f deployment.yaml -n music-analysis
-kubectl apply -f service.yaml -n music-analysis
-```
-
-### Monitor
-
-```bash
-# Check deployments
-kubectl get deployments -n music-analysis
-
-# Check pods
-kubectl get pods -n music-analysis
-
-# View logs
-kubectl logs -f deployment/backend -n music-analysis
-
-# Port forward
-kubectl port-forward svc/backend 8000:8000 -n music-analysis
-```
-
----
-
-## Performance Tuning
-
-### Backend Optimization
-
-```python
-# backend/config.py
-# Adjust based on available resources
-CACHE_TTL = 3600        # Cache results 1 hour
-ENABLE_CACHING = True   # Enable caching
-```
-
-### Model Optimization
-
-```python
-# models/app/server.py
-# Batch size affects throughput vs latency
-BATCH_SIZE = 32  # Increase for throughput
-```
-
-### Docker Resources
+### 1. Create Deployment Manifests
 
 ```yaml
-# docker/docker-compose.yml
-services:
-  backend:
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 4G
-        reservations:
-          cpus: '1'
-          memory: 2G
+# k8s/backend-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: music-backend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: music-backend
+  template:
+    metadata:
+      labels:
+        app: music-backend
+    spec:
+      containers:
+      - name: backend
+        image: music-backend:latest
+        ports:
+        - containerPort: 8000
+        env:
+        - name: MODEL_DIR
+          value: "/app/models/trained_models"
+```
+
+### 2. Deploy to Kubernetes
+
+```bash
+kubectl apply -f k8s/backend-deployment.yaml
+kubectl apply -f k8s/backend-service.yaml
+```
+
+### 3. Check Status
+
+```bash
+kubectl get pods
+kubectl get services
+kubectl logs -f deployment/music-backend
+```
+
+---
+
+## Environment Variables
+
+```bash
+# Backend configuration
+export MODEL_DIR="models/trained_models"
+export MODEL_NAME="genre_classifier_production"
+export LOG_LEVEL="info"
+export MAX_WORKERS=4
+
+# API configuration
+export API_HOST="0.0.0.0"
+export API_PORT=8000
+export API_RELOAD=false
+
+# Model configuration
+export DEVICE="cpu"  # or "cuda" for GPU
+export BATCH_SIZE=64
+```
+
+---
+
+## Monitoring and Logging
+
+### Application Logs
+
+```bash
+# Docker
+docker-compose logs -f backend
+
+# Kubernetes
+kubectl logs -f deployment/music-backend
+```
+
+### Health Checks
+
+```bash
+# Local
+curl http://localhost:8000/health
+
+# Docker
+curl http://localhost:8000/health
+
+# Kubernetes
+kubectl port-forward svc/music-backend 8000:8000
+curl http://localhost:8000/health
 ```
 
 ---
 
 ## Troubleshooting
 
-### Backend Won't Start
+### Port Already in Use
 
 ```bash
-# Check port is available
+# Find process using port 8000
 lsof -i :8000
 
-# Check dependencies
-pip install -r requirements.txt
-
-# Run with verbose logging
-LOG_LEVEL=DEBUG python app.py
+# Kill process
+kill -9 <PID>
 ```
 
-### Model Server Not Responding
+### Model Not Loading
 
 ```bash
-# Check Docker logs
-docker-compose logs model-server
+# Check model files exist
+ls -lh models/trained_models/
 
-# Check GPU availability
-docker exec music_analysis_model_server nvidia-smi
-
-# Verify model file exists
-ls -la models/trained_models/cnn_best_model.pt
+# Check permissions
+chmod +r models/trained_models/*
 ```
 
-### Tests Failing
+### Docker Build Fails
 
 ```bash
-# Run individual test with output
-python tests/quick_cnn_test.py
+# Clean docker cache
+docker system prune -a
 
-# Check dependencies
-pip install torch numpy scipy librosa
-
-# Clean and retry
-rm -rf __pycache__ .pytest_cache
-python tests/quick_cnn_test.py
-```
-
-### API Not Responding
-
-```bash
-# Check service health
-curl -v http://localhost:8000/api/v1/health
-
-# Check logs
-docker-compose logs backend
-
-# Restart service
-docker-compose restart backend
+# Rebuild without cache
+docker-compose build --no-cache
 ```
 
 ---
 
-## Monitoring
+## Performance Optimization
 
-### Logs
-
-```bash
-# Backend logs
-docker-compose logs -f backend
-
-# Model server logs
-docker-compose logs -f model-server
-
-# All logs
-docker-compose logs -f
-```
-
-### Health Checks
+### 1. Enable GPU (if available)
 
 ```bash
-# Automated
-watch curl http://localhost:8000/api/v1/health
-
-# Manual
-curl http://localhost:8000/api/v1/status
+# Update docker-compose.yml
+services:
+  model-server:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 ```
 
----
-
-## Stopping Services
+### 2. Increase Workers
 
 ```bash
-# Stop containers (keep volumes)
-docker-compose stop
-
-# Stop and remove containers (keep volumes)
-docker-compose down
-
-# Stop and remove everything
-docker-compose down -v
-
-# Remove Docker images
-docker-compose down --rmi all
+# Update uvicorn command
+uvicorn backend.app:app --host 0.0.0.0 --port 8000 --workers 4
 ```
 
----
+### 3. Add Caching
 
-## See Also
+```python
+# In backend/app.py
+from functools import lru_cache
 
-- [README.md](README.md) - Project overview
-- [ARCHITECTURE.md](ARCHITECTURE.md) - System design
-- [tests/README.md](tests/README.md) - Test documentation
-- [API_GUIDE.md](API_GUIDE.md) - API endpoint reference
+@lru_cache(maxsize=100)
+def cached_prediction(features_hash):
+    # Cache frequently requested predictions
+    pass
+```
 
 ---
 

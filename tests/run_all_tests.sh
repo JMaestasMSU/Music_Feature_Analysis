@@ -1,110 +1,78 @@
 #!/bin/bash
 
-# Music Feature Analysis - Quick Test Suite
-# Runs all component tests in < 2 minutes
-
-# set -e  # Exit on error (DISABLED to allow all tests to run)
-
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-# Parse arguments
-CI_MODE=false
-CPU_ONLY=false
-
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --ci-mode)
-            CI_MODE=true
-            shift
-            ;;
-        --cpu-only)
-            CPU_ONLY=true
-            shift
-            ;;
-        *)
-            echo "Unknown option: $1"
-            exit 1
-            ;;
-    esac
-done
-
-echo "=========================================="
-echo "Music Feature Analysis - Test Suite"
-echo "=========================================="
+echo "========================================================================"
+echo "RUNNING ALL QUICK TESTS - Music Feature Analysis"
+echo "========================================================================"
 echo ""
 
-# Track results
+# Determine script directory (works on macOS, Linux, Windows Git Bash)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
 TESTS_PASSED=0
 TESTS_FAILED=0
-START_TIME=$(date +%s)
 
-# Function to run test and track result
-run_test() {
-    local test_name=$1
-    local test_file=$2
-    local test_args=$3
-    
-    echo -n "Running $test_name... "
-    
-    if [ "$CI_MODE" = true ]; then
-        test_args="$test_args --ci"
-    fi
-    
-    if [ "$CPU_ONLY" = true ]; then
-        test_args="$test_args --cpu-only"
-    fi
-    
-    if python "$test_file" $test_args > /dev/null 2>&1; then
-        echo -e "${GREEN}[OK] PASSED${NC}"
-        ((TESTS_PASSED++))
-        return 0
-    else
-        echo -e "${RED}[FAIL] FAILED${NC}"
-        ((TESTS_FAILED++))
-        return 1
-    fi
-}
+# Determine Python command (python3 on macOS/Linux, python on Windows)
+if command -v python3 &> /dev/null; then
+    PYTHON_CMD="python3"
+else
+    PYTHON_CMD="python"
+fi
+
+echo "Using Python: $PYTHON_CMD"
+echo ""
 
 # Test 1: FFT Validation
-run_test "FFT Validation" "quick_fft_test.py" ""
+echo "[1/4] Running FFT validation test..."
+if $PYTHON_CMD quick_fft_test.py; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
+echo ""
 
 # Test 2: Audio Processing
-run_test "Audio Processing" "quick_audio_processing_test.py" ""
-
-# Test 3: CNN Architecture (CPU-only in CI)
-if [ "$CI_MODE" = true ] || [ "$CPU_ONLY" = true ]; then
-    run_test "CNN Architecture (CPU)" "quick_cnn_test.py" "--cpu-only"
+echo "[2/4] Running audio processing test..."
+if $PYTHON_CMD quick_audio_processing_test.py; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    run_test "CNN Architecture" "quick_cnn_test.py" ""
+    TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
+echo ""
 
-# Test 4: Bayesian Optimization (optional in CI)
-if [ "$CI_MODE" = false ]; then
-    run_test "Bayesian Optimization" "quick_bayesian_test.py" ""
+# Test 3: CNN Architecture
+echo "[3/4] Running CNN architecture test..."
+if $PYTHON_CMD quick_cnn_test.py --cpu-only; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
-
-# Calculate duration
-END_TIME=$(date +%s)
-DURATION=$((END_TIME - START_TIME))
-
-# Print summary
 echo ""
-echo "=========================================="
-echo "Test Summary"
-echo "=========================================="
-echo -e "Tests Passed: ${GREEN}$TESTS_PASSED${NC}"
-echo -e "Tests Failed: ${RED}$TESTS_FAILED${NC}"
-echo "Duration: ${DURATION}s"
+
+# Test 4: Bayesian Optimization
+echo "[4/4] Running Bayesian optimization test..."
+if $PYTHON_CMD quick_bayesian_test.py; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
 echo ""
+
+# Summary
+echo "========================================================================"
+echo "TEST SUMMARY"
+echo "========================================================================"
+echo "Passed: $TESTS_PASSED / 4"
+echo "Failed: $TESTS_FAILED / 4"
 
 if [ $TESTS_FAILED -eq 0 ]; then
-    echo -e "${GREEN}All tests passed!${NC}"
+    echo ""
+    echo "[OK] All tests passed! ✓"
+    echo "========================================================================"
     exit 0
 else
-    echo -e "${RED}Some tests failed!${NC}"
+    echo ""
+    echo "[FAIL] Some tests failed ✗"
+    echo "========================================================================"
     exit 1
 fi

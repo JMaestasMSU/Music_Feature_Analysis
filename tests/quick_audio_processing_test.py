@@ -1,167 +1,171 @@
 """
 Quick Audio Processing Test
-Tests audio feature extraction pipeline without requiring actual audio files.
+Tests audio feature extraction pipeline with synthetic audio.
+No real audio files required.
 """
 
 import sys
 import argparse
 import numpy as np
-from scipy import signal as scipy_signal
+from pathlib import Path
+
+# Add parent directory to path
+sys.path.append(str(Path(__file__).parent.parent))
+
+from preprocessing.feature_extraction import extract_features, features_to_array
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Quick Audio Processing Test')
     parser.add_argument('--ci', action='store_true', help='CI mode')
     return parser.parse_args()
 
+
 def generate_synthetic_audio(duration=1.0, sr=22050):
-    """Generate synthetic audio for testing"""
-    t = np.linspace(0, duration, int(sr * duration))
+    """Generate synthetic audio signal."""
+    t = np.arange(0, duration, 1/sr)
     
-    # Mix of frequencies (simulates music)
-    audio = (
-        0.5 * np.sin(2 * np.pi * 440 * t) +  # A4
-        0.3 * np.sin(2 * np.pi * 880 * t) +  # A5
-        0.2 * np.sin(2 * np.pi * 220 * t) +  # A3
-        0.1 * np.random.randn(len(t))         # Noise
+    # Mix of sine waves (simulate music)
+    signal = (
+        0.5 * np.sin(2 * np.pi * 440 * t) +  # A4 note
+        0.3 * np.sin(2 * np.pi * 880 * t) +  # A5 note
+        0.2 * np.sin(2 * np.pi * 1320 * t)   # E6 note
     )
     
-    # Normalize audio to [-1, 1]
-    max_abs = np.max(np.abs(audio))
-    if max_abs > 0:
-        audio = audio / max_abs
-
-    return audio, sr
-
-def compute_mfcc(audio, sr, n_mfcc=13):
-    """Simplified MFCC computation"""
-    # This is a simplified version - real implementation uses librosa
-    # For testing, we just verify the shape and basic properties
+    # Add some noise
+    noise = np.random.randn(len(signal)) * 0.05
+    signal = signal + noise
     
-    # Create mel spectrogram (simplified)
-    f, t, Sxx = scipy_signal.spectrogram(audio, sr, nperseg=512, noverlap=256)
-    
-    # Simulate MFCC output shape
-    n_frames = Sxx.shape[1]
-    mfcc = np.random.randn(n_mfcc, n_frames)  # Placeholder
-    
-    return mfcc
+    return signal, sr
 
-def test_audio_generation(verbose=True):
-    """Test 1: Generate synthetic audio"""
+
+def test_feature_extraction(verbose=True):
+    """Test 1: Can extract features from synthetic audio."""
     if verbose:
-        print("Test 1: Audio generation...", end=" ")
+        print("Test 1: Feature extraction from synthetic audio...", end=" ")
     
     try:
-        audio, sr = generate_synthetic_audio()
+        # Generate synthetic audio
+        audio, sr = generate_synthetic_audio(duration=2.0)
         
-        assert len(audio) > 0, "Audio is empty"
-        assert sr == 22050, f"Expected sr=22050, got {sr}"
-        assert -1.0 <= audio.min() <= audio.max() <= 1.0, "Audio values out of range"
+        # Save to temporary file
+        import tempfile
+        import soundfile as sf
+        
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
+            sf.write(tmp.name, audio, sr)
+            tmp_path = tmp.name
+        
+        # Extract features
+        features = extract_features(tmp_path, sr=sr, duration=2.0)
+        
+        # Validate features
+        assert 'mfcc' in features, "Missing MFCC features"
+        assert 'spectral_centroid' in features, "Missing spectral centroid"
+        assert 'spectral_rolloff' in features, "Missing spectral rolloff"
+        assert 'zcr' in features, "Missing zero crossing rate"
+        assert 'chroma' in features, "Missing chroma features"
+        assert 'rms_energy' in features, "Missing RMS energy"
+        
+        # Check dimensions
+        assert len(features['mfcc']) == 13, f"Expected 13 MFCCs, got {len(features['mfcc'])}"
+        assert len(features['chroma']) == 12, f"Expected 12 chroma bins, got {len(features['chroma'])}"
+        
+        # Clean up
+        import os
+        os.unlink(tmp_path)
         
         if verbose:
-            print(f"[OK] PASSED (length: {len(audio)} samples)")
+            print("[OK] PASSED")
         return True
+        
     except Exception as e:
         if verbose:
             print(f"[FAIL] FAILED: {e}")
         return False
 
-def test_spectral_centroid_extraction(verbose=True):
-    """Test 2: Extract spectral centroid"""
+
+def test_features_to_array(verbose=True):
+    """Test 2: Can convert features to array."""
     if verbose:
-        print("Test 2: Spectral centroid...", end=" ")
+        print("Test 2: Feature conversion to array...", end=" ")
     
     try:
-        audio, sr = generate_synthetic_audio()
+        # Create dummy features
+        features = {
+            'mfcc': np.random.randn(13),
+            'spectral_centroid': 2000.0,
+            'spectral_rolloff': 7000.0,
+            'zcr': 0.1,
+            'rms_energy': 0.05,
+            'chroma': np.random.randn(12)
+        }
         
-        # Compute spectrogram
-        f, t, Sxx = scipy_signal.spectrogram(audio, sr, nperseg=512, noverlap=256)
+        # Convert to array
+        feature_array = features_to_array(features)
         
-        # Compute centroid for each frame
-        centroids = []
-        for frame in range(Sxx.shape[1]):
-            magnitude = Sxx[:, frame]
-            centroid = np.sum(f * magnitude) / np.sum(magnitude)
-            centroids.append(centroid)
+        # Validate
+        expected_length = 13 + 1 + 1 + 1 + 1 + 12  # 29 features
+        assert len(feature_array) == expected_length, \
+            f"Expected {expected_length} features, got {len(feature_array)}"
         
-        centroids = np.array(centroids)
-        
-        assert len(centroids) > 0, "No centroids computed"
-        assert np.all(centroids >= 0), "Negative centroids"
-        assert np.all(centroids < sr/2), "Centroids exceed Nyquist"
+        assert feature_array.ndim == 1, "Feature array should be 1D"
         
         if verbose:
-            print(f"[OK] PASSED (mean: {centroids.mean():.2f} Hz)")
+            print(f"[OK] PASSED (vector length: {len(feature_array)})")
         return True
+        
     except Exception as e:
         if verbose:
             print(f"[FAIL] FAILED: {e}")
         return False
 
-def test_zero_crossing_rate(verbose=True):
-    """Test 3: Compute zero crossing rate"""
+
+def test_batch_processing(verbose=True):
+    """Test 3: Can process batch of audio files."""
     if verbose:
-        print("Test 3: Zero crossing rate...", end=" ")
+        print("Test 3: Batch processing...", end=" ")
     
     try:
-        audio, sr = generate_synthetic_audio()
+        import tempfile
+        import soundfile as sf
         
-        # Compute ZCR
-        zero_crossings = np.where(np.diff(np.sign(audio)))[0]
-        zcr = len(zero_crossings) / len(audio)
+        # Generate multiple audio files
+        temp_files = []
+        for i in range(3):
+            audio, sr = generate_synthetic_audio(duration=1.0)
+            
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
+                sf.write(tmp.name, audio, sr)
+                temp_files.append(tmp.name)
         
-        assert 0 <= zcr <= 1, f"ZCR out of range: {zcr}"
+        # Batch extract (simulated - call extract_features for each)
+        features_list = []
+        for path in temp_files:
+            features = extract_features(path, sr=sr, duration=1.0)
+            features_list.append(features)
+        
+        # Validate
+        assert len(features_list) == 3, "Should have extracted features from 3 files"
+        
+        for features in features_list:
+            assert 'mfcc' in features
+            assert 'spectral_centroid' in features
+        
+        # Clean up
+        import os
+        for path in temp_files:
+            os.unlink(path)
         
         if verbose:
-            print(f"[OK] PASSED (ZCR: {zcr:.4f})")
+            print(f"[OK] PASSED (processed {len(features_list)} files)")
         return True
+        
     except Exception as e:
         if verbose:
             print(f"[FAIL] FAILED: {e}")
         return False
 
-def test_rms_energy(verbose=True):
-    """Test 4: Compute RMS energy"""
-    if verbose:
-        print("Test 4: RMS energy...", end=" ")
-    
-    try:
-        audio, sr = generate_synthetic_audio()
-        
-        # Compute RMS
-        rms = np.sqrt(np.mean(audio**2))
-        
-        assert rms > 0, "RMS is zero"
-        assert rms < 1, f"RMS too high: {rms}"
-        
-        if verbose:
-            print(f"[OK] PASSED (RMS: {rms:.4f})")
-        return True
-    except Exception as e:
-        if verbose:
-            print(f"[FAIL] FAILED: {e}")
-        return False
-
-def test_mfcc_extraction(verbose=True):
-    """Test 5: Extract MFCC features"""
-    if verbose:
-        print("Test 5: MFCC extraction...", end=" ")
-    
-    try:
-        audio, sr = generate_synthetic_audio()
-        
-        mfcc = compute_mfcc(audio, sr, n_mfcc=13)
-        
-        assert mfcc.shape[0] == 13, f"Expected 13 MFCCs, got {mfcc.shape[0]}"
-        assert mfcc.shape[1] > 0, "No MFCC frames"
-        
-        if verbose:
-            print(f"[OK] PASSED (shape: {mfcc.shape})")
-        return True
-    except Exception as e:
-        if verbose:
-            print(f"[FAIL] FAILED: {e}")
-        return False
 
 def main():
     args = parse_args()
@@ -175,17 +179,20 @@ def main():
     
     # Run tests
     tests = [
-        test_audio_generation,
-        test_spectral_centroid_extraction,
-        test_zero_crossing_rate,
-        test_rms_energy,
-        test_mfcc_extraction
+        test_feature_extraction,
+        test_features_to_array,
+        test_batch_processing
     ]
     
     results = []
     for test in tests:
-        result = test(verbose=verbose)
-        results.append(result)
+        try:
+            result = test(verbose=verbose)
+            results.append(result)
+        except Exception as e:
+            if verbose:
+                print(f"[EXCEPTION] {e}")
+            results.append(False)
     
     # Summary
     passed = sum(results)
@@ -205,6 +212,7 @@ def main():
         if verbose:
             print(f"\n[FAIL] {total - passed} test(s) failed")
         sys.exit(1)
+
 
 if __name__ == '__main__':
     main()

@@ -92,6 +92,34 @@ docker/                       Containerization
 └── docker-compose.yml       Orchestration
 ```
 
+### Data Storage (Not in Git)
+
+```
+data/                             Local data storage (excluded from git)
+├── README.md                     Data documentation
+├── .gitkeep                      Ensures directory exists
+├── raw/                          Original audio files (~8 GB)
+│   └── fma_small/                FMA dataset audio files
+│       ├── 000/
+│       ├── 001/
+│       └── ...
+├── processed/                    Extracted features & splits
+│   ├── features.csv              Audio features for all tracks
+│   └── preprocessed_data.pkl     Train/val/test split
+└── metadata/                     Dataset metadata (~5 MB)
+    ├── tracks.csv                Track information & genres
+    ├── genres.csv                Genre definitions
+    └── features.csv              Pre-computed audio features
+```
+
+**Why excluded from git:**
+- Audio files are large (~8 GB total)
+- Features can be regenerated
+- Users download their own copy
+- Prevents repo bloat
+
+**See [data/README.md](data/README.md) for download instructions.**
+
 ### Testing (`tests/`)
 
 Quick integration tests (not graded, but proves system works):
