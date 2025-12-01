@@ -118,48 +118,9 @@ Music_Feature_Analysis/
 
 ---
 
-## Quick Start
+## Quick Start (3 Steps)
 
-### 1. Setup Data (Choose One Option)
-
-**Option A: Download Real FMA Dataset (~8 GB)**
-
-*macOS/Linux:*
-```bash
-cd data/raw/
-curl -L -o fma_small.zip https://os.unil.cloud.switch.ch/fma/fma_small.zip
-unzip fma_small.zip
-cd ../metadata/
-curl -L -o fma_metadata.zip https://os.unil.cloud.switch.ch/fma/fma_metadata.zip
-unzip fma_metadata.zip
-cd ../../
-```
-
-*Windows PowerShell:*
-```powershell
-cd data\raw\
-Invoke-WebRequest -Uri "https://os.unil.cloud.switch.ch/fma/fma_small.zip" -OutFile "fma_small.zip"
-Expand-Archive -Path fma_small.zip -DestinationPath . -Force
-cd ..\metadata\
-Invoke-WebRequest -Uri "https://os.unil.cloud.switch.ch/fma/fma_metadata.zip" -OutFile "fma_metadata.zip"
-Expand-Archive -Path fma_metadata.zip -DestinationPath . -Force
-cd ..\..\
-```
-
-*Windows Command Prompt:*
-```batch
-cd data\raw\
-curl -L -o fma_small.zip https://os.unil.cloud.switch.ch/fma/fma_small.zip
-tar -xf fma_small.zip
-cd ..\metadata\
-curl -L -o fma_metadata.zip https://os.unil.cloud.switch.ch/fma/fma_metadata.zip
-tar -xf fma_metadata.zip
-cd ..\..
-```
-
-**Option B: Use Pre-Computed Features Only (~5 MB)**
-
-*macOS/Linux:*
+### 1. Download Data (One Time)
 ```bash
 cd data/metadata/
 curl -L -o fma_metadata.zip https://os.unil.cloud.switch.ch/fma/fma_metadata.zip
@@ -167,89 +128,25 @@ unzip fma_metadata.zip
 cd ../../
 ```
 
-*Windows PowerShell:*
-```powershell
-cd data\metadata\
-Invoke-WebRequest -Uri "https://os.unil.cloud.switch.ch/fma/fma_metadata.zip" -OutFile "fma_metadata.zip"
-Expand-Archive -Path fma_metadata.zip -DestinationPath . -Force
-cd ..\..\
+### 2. Create Features (One Time)
+```bash
+python scripts/create_features.py
+# Creates: data/processed/ml_ready_features.pkl
 ```
 
-**Option C: Use Synthetic Data (No Download)**
-
-Notebooks automatically generate synthetic data if real data not found.
-
-See **[data/README.md](data/README.md)** for detailed instructions.
-
-### 2. View Deliverables (For Grading)
-
+### 3. Run Anything
 ```bash
-# Open notebooks in Jupyter
+# Notebooks
 jupyter notebook notebooks/01_EDA.ipynb
-jupyter notebook notebooks/02_Modeling.ipynb
 
-# View presentation (after compilation)
-open presentation/presentation.pdf
+# API
+python backend/app.py
 
-# Read summary
-cat presentation/SUMMARY.md
+# Tests
+bash tests/run_all_tests.sh
 ```
 
-### 3. Run Quick Tests (Prove Components Work)
-
-```bash
-cd tests/
-bash run_all_tests.sh
-```
-
-**Tests complete in < 2 minutes and validate:**
-- FFT spectral analysis
-- Audio feature extraction
-- Neural network architecture
-- Bayesian optimization
-
-### 4. Development Setup
-
-**macOS/Linux:**
-```bash
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Start Jupyter
-jupyter notebook
-```
-
-**Windows PowerShell:**
-```powershell
-# Create virtual environment
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Start Jupyter
-jupyter notebook
-```
-
-**Windows Command Prompt:**
-```batch
-REM Create virtual environment
-python -m venv venv
-venv\Scripts\activate.bat
-
-REM Install dependencies
-pip install -r requirements.txt
-
-REM Start Jupyter
-jupyter notebook
-```
-
-**See [QUICKSTART.md](QUICKSTART.md) for detailed setup instructions.**
+**That's it!** Everything uses `data/processed/ml_ready_features.pkl` automatically.
 
 ---
 
