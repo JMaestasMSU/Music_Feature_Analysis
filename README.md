@@ -17,8 +17,6 @@ An **end-to-end machine learning system** for music genre classification that co
 - **Production REST API**
 - **Comprehensive Documentation** 
 
-**Total Deliverables: 35 points**
-
 ---
 
 ## Directory Structure
@@ -37,13 +35,13 @@ Music_Feature_Analysis/
 ├── PROJECT_SUMMARY.md                     ← Alternative summary format
 │
 ├── notebooks/                             GRADED DELIVERABLES
-│   ├── 01_EDA.ipynb                       (15 pts) Data exploration
-│   └── 02_Modeling.ipynb                  (5 pts) Model training & evaluation
+│   ├── 01_EDA.ipynb                       Data exploration
+│   └── 02_Modeling.ipynb                  Model training & evaluation
 │
 ├── presentation/                          FINAL DELIVERABLES
 │   ├── presentation.Rmd                   Template for slides
-│   ├── presentation.pdf                   (9 pts) Compiled slides
-│   ├── SUMMARY.md                         (6 pts) Project findings
+│   ├── presentation.pdf                   Compiled slides
+│   ├── SUMMARY.md                         Project findings
 │   └── figures/                           Generated visualizations
 │
 ├── app/                                   MODEL INFERENCE SERVER
@@ -162,7 +160,7 @@ bash tests/run_all_tests.sh
 ### Documentation
 **Location:** `presentation/`
 
-- **Slides (9 pts)**: 5-slide PDF presentation
+- **Slides**: 5-slide PDF presentation
   - Project overview and motivation
   - Data preprocessing pipeline
   - Model architecture and methods
@@ -296,8 +294,6 @@ docker-compose up -d
 
 **Student:** Jarred Maestas  
 **Course:** CS 3120 - Machine Learning  
-**Semester:** Fall 2024  
-**Project Option:** B - Explore and Model a Unique Dataset
 
 ---
 
@@ -320,14 +316,3 @@ This project demonstrates:
 - Clear documentation and testing
 
 All code is original or properly cited. No plagiarism or unauthorized collaboration.
-
----
-
-**Last Updated**: 2025
-**Status**: Unknown
-
-**Quick Links:**
-- [Quick Start Guide](QUICKSTART.md)
-- [System Architecture](ARCHITECTURE.md)
-- [Project Summary](presentation/SUMMARY.md)
-- [Testing Guide](LOCAL_TESTING.md)

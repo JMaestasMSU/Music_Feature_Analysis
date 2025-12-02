@@ -110,7 +110,3 @@ python quick_cnn_test.py --cpu-only
 ```
 
 **Slow tests**: Check CPU usage, close other apps
-
----
-
-**Last Updated**: 2024

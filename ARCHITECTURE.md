@@ -5,36 +5,36 @@
 This project demonstrates a complete machine learning pipeline from exploratory data analysis through production deployment, combining academic rigor with enterprise-grade software engineering.
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                 GRADED DELIVERABLES (35 pts)                 │
-│                                                              │
+┌────────────────────────────────────────────────────────────┐
+│                 GRADED DELIVERABLES                        │
+│                                                            │
 │  ┌────────────────────┐  ┌───────────────────────────────┐ │
-│  │   Notebooks (20)   │  │  Presentation (15)            │ │
+│  │   Notebooks        │  │  Presentation                 │ │
 │  │                    │  │                               │ │
 │  │  01_EDA.ipynb      │  │  presentation.pdf (9)         │ │
 │  │  • Data exploration│  │  • 5 professional slides      │ │
 │  │  • Feature analysis│  │                               │ │
-│  │  • Visualizations  │  │  SUMMARY.md (6)               │ │
-│  │  (15 pts)          │  │  • Findings & insights        │ │
+│  │  • Visualizations  │  │  SUMMARY.md                   │ │
+│  │                    │  │  • Findings & insights        │ │
 │  │                    │  │  • Limitations                │ │
 │  │  02_Modeling.ipynb │  │  • Future work                │ │
 │  │  • Architecture    │  │                               │ │
 │  │  • Training        │  │                               │ │
 │  │  • Evaluation      │  │                               │ │
-│  │  (5 pts)           │  │                               │ │
+│  │                    │  │                               │ │
 │  └────────────────────┘  └───────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
+└────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│         PRODUCTION COMPONENTS (Not Graded, Optional)         │
-│                                                              │
-│  Backend API (8000) ────► Model Server (8001)                │
+│         PRODUCTION COMPONENTS (Not Graded, Optional)        │
+│                                                             │
+│  Backend API (8000) ────► Model Server (8001)               │
 │  • FastAPI              • PyTorch inference                 │
 │  • Audio upload         • GPU-accelerated                   │
 │  • Feature extraction   • Batch processing                  │
 │  • Orchestration        • Model management                  │
-│                                                              │
+│                                                             │
 │  MATLAB/NumPy FFT ──────► Validation & Analysis             │
 │  • Parseval's theorem   • Feature comparison                │
 │  • Spectral analysis    • Numerical validation              │
@@ -43,83 +43,7 @@ This project demonstrates a complete machine learning pipeline from exploratory 
 
 ---
 
-## Grading Deliverables
-
-### 1. Exploratory Data Analysis Notebook (15 pts)
-**File**: `notebooks/01_EDA.ipynb`
-
-**Content Required**:
-- Dataset overview (size, samples, duration, genres)
-- Data quality assessment (missing values, balance)
-- Feature extraction explanation
-- Statistical analysis by genre
-- Visualizations (5+ charts)
-- Preprocessing strategy
-- Train/val/test split approach
-
-**Grading Criteria**:
-- Thorough exploration of dataset
-- Appropriate visualizations
-- Well-organized, commented code
-
-### 2. Modeling Notebook (5 pts)
-**File**: `notebooks/02_Modeling.ipynb`
-
-**Content Required**:
-- Model architecture explanation
-- Training procedure
-- Evaluation metrics (accuracy, precision, recall, F1)
-- Performance results
-- Limitations acknowledged
-
-**Grading Criteria**:
-- Basic evaluation metrics present
-- Model performance clearly shown
-- Limitations explained
-
-### 3. Presentation Slides (9 pts)
-**File**: `presentation/presentation.pdf`
-
-**Slide Requirements** (5 slides, ~6 minutes):
-1. **Project Overview** (3 pts)
-   - Problem statement
-   - Why interesting/important
-   - Project goals
-
-2. **Data Preprocessing** (3 pts)
-   - Dataset description
-   - Feature engineering steps
-   - Data cleaning
-
-3. **Models & Methods** (3 pts)
-   - Model choice explanation
-   - Why chosen
-   - Alternative approaches considered
-
-4. **Results & Evaluation** (3 pts)
-   - Performance metrics
-   - Key findings
-   - Challenges encountered
-
-5. **Conclusion & Future Work** (3 pts)
-   - Lessons learned
-   - Improvements possible
-   - Next steps
-
-### 4. Documentation Summary (6 pts)
-**File**: `presentation/SUMMARY.md`
-
-**Content Required**:
-- Executive summary
-- Key findings from EDA
-- Model insights
-- Feature importance
-- Limitations
-- Future improvements
-
----
-
-## Production Components (Enterprise-Grade, Not Graded)
+## Production Components
 
 ### Model Inference Server (FastAPI)
 **Location**: `app/`

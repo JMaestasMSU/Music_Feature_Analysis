@@ -5,96 +5,112 @@ author: "Jarred Maestas"
 date: "Fall 2025"
 output:
   beamer_presentation:
-    theme: "Madrid"
-    colortheme: "default"
+    theme: "Dresden"
+    colortheme: "albatross"
     fonttheme: "default"
-    slide_level: 2
+    slide_level: 1
 ---
-
-# Slide 1: Project Overview
-
-## Project Overview
 
 ### Problem Statement
-- **Goal:** Classify musical tracks into 8 genres using audio features and machine learning
-- **Dataset:** 8,000 30-second audio clips from Free Music Archive (FMA)
-- **Genres:** Rock, Electronic, Hip-Hop, Classical, Jazz, Folk, Pop, Experimental
+- Classify music tracks into 8 genres
+- 8,000 audio clips (30 seconds each)
+- Data from Free Music Archive (FMA)
 
 ### Why This Project?
-- Music data combines complex **temporal and frequency patterns**
-- Bridges creative domain with technical ML challenges
-- Practical applications in music streaming and recommendation systems
-- Unique opportunity to compare **traditional ML vs. deep learning**
+- Music combines temporal and frequency patterns
+- Practical for streaming recommendations
+- Compare traditional ML vs deep learning
+- Personal interest of Mine
 
-### Key Objectives
-1. Explore and visualize patterns in audio features across genres
-2. Develop baseline and advanced ML models for genre classification
-3. Compare hand-crafted features vs. learned representations
-4. Analyze model performance and limitations
+\vspace{0.05cm}
 
----
-
-# Slide 2: Data Preprocessing & Feature Engineering
-
-## Data Understanding
-
-### Dataset Composition
-- **Total tracks:** 8,000 audio files
-- **Duration:** 30-second clips each
-- **Genre distribution:** Balanced (~1,000 per genre)
-- **Pre-computed features:** 20+ audio characteristics
-
-### Key Audio Features Extracted
-- **MFCCs:** Mel-Frequency Cepstral Coefficients (timbral characteristics)
-- **Spectral features:** Centroid, rolloff, bandwidth
-- **Temporal features:** Zero-crossing rate, energy
-- **Chroma vectors:** Harmonic and pitch content
-
-### Data Preprocessing
-- Standardization/normalization for ML algorithms
-- Stratified train-test split (80/20) to maintain genre balance
-- Dimensionality analysis: PCA shows 25 components for 95% variance
-- No significant missing values detected
+```{r echo=FALSE, out.width="70%", fig.align="center"}
+knitr::include_graphics("presentation/figures/00_spectrograms_examples.png")
+```
 
 ---
 
-# Slide 3: Modeling Approach & Methods
+# Data Preprocessing & Feature Engineering
+
+### Dataset Overview
+- **8,000 tracks** across 8 genres
+- **20+ audio features** pre-extracted
+- Balanced genre distribution
+
+### Key Features Extracted
+- **MFCCs:** Timbral characteristics
+- **Spectral:** Centroid, rolloff, bandwidth
+- **Temporal:** Zero-crossing rate, energy
+- **Chroma:** Harmonic and pitch content
+
+---
+
+## Feature Analysis
+
+```{r echo=FALSE, out.width="90%", fig.align="center"}
+knitr::include_graphics("presentation/figures/02_feature_distributions.png")
+```
+
+---
+
+## Genre Profiles
+
+```{r echo=FALSE, out.width="95%", fig.align="center"}
+knitr::include_graphics("presentation/figures/04_genre_profiles.png")
+```
+
+---
+
+## Data Preprocessing Steps
+
+- Standardization for ML algorithms
+- Stratified 80/20 train-test split
+- PCA: 25 components for 95% variance
+- No missing values detected
+
+```{r echo=FALSE, out.width="70%", fig.align="center"}
+knitr::include_graphics("presentation/figures/06_normalization_comparison.png")
+```
+
+---
+
+# Modeling Approach & Methods
 
 ## Machine Learning Models
 
-### Model 1: Random Forest (Baseline)
-- **Architecture:** 100 decision trees, max depth 15
-- **Why chosen:** Interpretable baseline, handles non-linear relationships
-- **Input:** Standardized hand-crafted audio features (20 dimensions)
-- **Evaluation:** 5-fold stratified cross-validation
+### Model 1: Random Forest
+- 100 trees, max depth 15
+- Interpretable baseline approach
+- Hand-crafted features (20 dimensions)
+- 5-fold cross-validation
 
-### Model 2: Autoencoder + K-Means (Advanced)
-- **Unsupervised learning:** Discovers latent audio patterns
-- **Architecture:** 
-  - Autoencoder: 20 → 64 → 32 → **8** (latent) → 32 → 64 → 20
-  - K-Means clustering on 8-dimensional latent space
-  - Gradient Boosting classifier on augmented features
-- **Advantage:** Learns data-driven features without manual engineering
-
-### Validation Strategy
-- Stratified k-fold cross-validation (k=5)
-- Genre-weighted F1-score for balanced evaluation
-- Per-genre performance analysis
+### Model 2: Autoencoder + Clustering
+- Unsupervised feature learning
+- Architecture: 20 → 64 → 32 → 8 (latent)
+- K-Means on latent space
+- Gradient Boosting on augmented features
 
 ---
 
-# Slide 4: Results & Evaluation
+## Feature Importance
+
+```{r echo=FALSE, out.width="95%", fig.align="center"}
+knitr::include_graphics("presentation/figures/05_feature_importance.png")
+```
+
+---
+
+# Results & Evaluation
 
 ## Model Performance
 
-### Overall Results
 \begin{center}
 \begin{tabular}{lcc}
 \hline
-\textbf{Metric} & \textbf{Random Forest} & \textbf{Autoencoder+K-Means} \\
+\textbf{Metric} & \textbf{Random Forest} & \textbf{Autoencoder} \\
 \hline
 Accuracy & 80\% & 78\% \\
-Weighted F1-Score & 0.80 & 0.77 \\
+F1-Score & 0.80 & 0.77 \\
 Precision & 0.81 & 0.79 \\
 Recall & 0.80 & 0.78 \\
 \hline
@@ -102,41 +118,50 @@ Recall & 0.80 & 0.78 \\
 \end{center}
 
 ### Key Findings
-- **Strong performance:** 80% accuracy demonstrates viability of audio-based classification
-- **Genre-specific results:** Classical (92% F1) and Electronic (88% F1) most distinguishable
-- **Challenging genres:** Folk and Experimental show greater overlap with other genres
-- **Model comparison:** Random Forest slightly outperforms due to optimized hand-crafted features
-
-### Challenges Encountered
-- Genre boundary ambiguity (tracks fit multiple categories)
-- Limited temporal information in 30-second clips
-- Feature overlap across adjacent genres (rock electronic)
+- **80% accuracy** on 8-genre classification
+- Classical (92%) and Electronic (88%) most distinguishable
+- Folk and Experimental overlap with others
+- Random Forest outperforms due to optimized features
 
 ---
 
-# Slide 5: Conclusion & Future Work
+## Challenges
 
-## Reflections and Future Directions
-
-### What We Learned
-- Audio features effectively capture genre characteristics (~80% accuracy achievable)
-- Simple models competitive with complex architectures on this task
-- **Trade-off:** Interpretability (Random Forest) vs. flexibility (Deep Learning)
-- Dimension reduction crucial: 8 latent dimensions nearly capture full information
-
-### Future Improvements
-1. **Advanced architectures:** CNN for spectrogram classification, RNN for temporal patterns
-2. **Data augmentation:** Time-stretching, pitch-shifting to expand training data
-3. **Transfer learning:** Pre-trained audio models (Wav2Vec2, similar to NLP transformers)
-4. **Ensemble methods:** Combine multiple models for improved robustness
-
-### If More Time...
-- Implement CNN architecture for end-to-end spectrogram learning
-- Systematic hyperparameter optimization via Bayesian search
-- Analysis of misclassifications: genre boundary ambiguity quantification
-- Extended evaluation on out-of-distribution music
-
-### Final Thoughts
-This project demonstrates that ML successfully tackles music genre classification despite inherent ambiguity. Results suggest **80% accuracy represents practical ceiling** for 8-genre classification on 30-second clips, with further improvements requiring either higher-quality data, longer audio samples, or more sophisticated architectures.
+- Genre boundary ambiguity
+- Limited temporal context (30 seconds)
+- Feature overlap between similar genres
 
 ---
+
+# Conclusion & Future Work
+
+## What We Learned
+
+- Audio features capture genre well (~80%)
+- Simple models competitive with deep learning
+- Trade-off: Interpretability vs flexibility
+- 8 latent dimensions capture key information
+
+## Future Improvements
+
+1. **CNNs** for spectrogram classification
+2. **Data augmentation** (pitch-shift, time-stretch)
+3. **Transfer learning** (Wav2Vec2 models)
+4. **Ensemble methods** for robustness
+
+---
+
+## Final Thoughts
+
+- ML successfully classifies music genres
+- **80% accuracy** likely practical ceiling for this task
+- Further improvements need:
+  - Longer audio samples
+  - Higher-quality features
+  - More sophisticated architectures
+
+\vspace{0.5cm}
+
+\begin{center}
+\textbf{Thank you!}
+\end{center}

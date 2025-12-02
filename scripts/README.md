@@ -58,7 +58,3 @@ unzip fma_metadata.zip
 ```bash
 chmod +x scripts/process_audio_files.py
 ```
-
----
-
-**Last Updated**: 2024

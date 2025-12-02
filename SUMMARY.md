@@ -2,8 +2,7 @@
 
 **Student:** Jarred Maestas  
 **Course:** CS 3120 - Machine Learning  
-**Semester:** Fall 2024  
-**Project Option:** B - Explore and Model a Unique Dataset
+**Semester:** Fall 2025
 
 ---
 
@@ -348,11 +347,3 @@ librosa >= 0.10.0 (for real audio processing)
 - Pons et al. (2018): End-to-end learning for music audio
 
 ---
-
-**Project Status**: Complete - All deliverables ready for submission  
-**Grading Components**: EDA (15) + Modeling (5) + Presentation (9) + Summary (6) = 35 points  
-**Submission Date**: Fall 2024
-
----
-
-*This summary fulfills the 6-point documentation requirement for CS 3120 Final Project Option B.*

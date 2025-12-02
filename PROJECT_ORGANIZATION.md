@@ -6,20 +6,20 @@ This document explains the project structure, what goes where, and how to prepar
 
 ## Directory Structure
 
-### Graded Deliverables (35 points total)
+### Graded Deliverables
 
 **For professors**: Grade **only** these files.
 
 ```
 notebooks/
-├── 01_EDA.ipynb              ← GRADE: 15 points
+├── 01_EDA.ipynb
 │   ├── Dataset overview
 │   ├── Feature extraction
 │   ├── Statistical analysis
 │   ├── 5+ visualizations
 │   └── Preprocessing strategy
 │
-└── 02_Modeling.ipynb         ← GRADE: 5 points
+└── 02_Modeling.ipynb
     ├── Neural network architecture
     ├── Training procedure
     ├── Evaluation metrics
@@ -27,14 +27,14 @@ notebooks/
     └── Limitations
 
 presentation/
-├── presentation.pdf          ← GRADE: 9 points
+├── presentation.pdf
 │   ├── Slide 1: Overview
 │   ├── Slide 2: Data preprocessing
 │   ├── Slide 3: Models & methods
 │   ├── Slide 4: Results
 │   └── Slide 5: Conclusion
 │
-└── SUMMARY.md                ← GRADE: 6 points
+└── SUMMARY.md
     ├── Executive summary
     ├── Key findings
     ├── Model insights
@@ -212,17 +212,17 @@ tests/
 ### For Graders
 
 1. **Review Notebooks**
-   - Open `notebooks/01_EDA.ipynb` → Grade EDA (15 pts)
-   - Open `notebooks/02_Modeling.ipynb` → Grade Modeling (5 pts)
+   - Open `notebooks/01_EDA.ipynb`
+   - Open `notebooks/02_Modeling.ipynb`
    - Use rubric in [README.md](README.md)
 
 2. **Review Presentation**
-   - Open `presentation/presentation.pdf` → Grade slides (9 pts)
+   - Open `presentation/presentation.pdf`
    - Check 5 slides present
    - Verify content per rubric
 
 3. **Review Documentation**
-   - Read `presentation/SUMMARY.md` → Grade summary (6 pts)
+   - Read `presentation/SUMMARY.md`
    - Check findings documented
    - Verify limitations addressed
 
@@ -230,48 +230,6 @@ tests/
    - `cd tests/ && bash run_all_tests.sh`
    - Demonstrates system integrity
    - Shows understanding of components
-
----
-
-## Detailed Grading Rubric
-
-### EDA Notebook (15 points)
-
-| Component | Points | Requirements |
-|-----------|--------|--------------|
-| **Dataset Overview** | 3 | Size, genres, duration, structure |
-| **Feature Extraction** | 4 | Spectral, MFCC, temporal features explained |
-| **Statistical Analysis** | 3 | Genre comparison, feature distributions |
-| **Visualizations** | 3 | 5+ charts, properly labeled |
-| **Preprocessing** | 2 | Train/val/test split, normalization |
-
-### Modeling Notebook (5 points)
-
-| Component | Points | Requirements |
-|-----------|--------|--------------|
-| **Architecture** | 2 | Clear explanation of model design |
-| **Evaluation** | 2 | Accuracy, precision, recall, F1-score |
-| **Results & Limitations** | 1 | Performance + acknowledged constraints |
-
-### Presentation Slides (9 points)
-
-| Component | Points | Requirements |
-|-----------|--------|--------------|
-| **Slide 1: Overview** | 1.8 | Problem statement, motivation, goals |
-| **Slide 2: Data** | 1.8 | Dataset description, preprocessing |
-| **Slide 3: Models** | 1.8 | Architecture, methods, rationale |
-| **Slide 4: Results** | 1.8 | Performance metrics, key findings |
-| **Slide 5: Conclusion** | 1.8 | Lessons learned, future work |
-| **Overall Quality** | 1.8 | Professional appearance, clarity |
-
-### Documentation Summary (6 points)
-
-| Component | Points | Requirements |
-|-----------|--------|--------------|
-| **Executive Summary** | 1 | Concise project overview |
-| **EDA Findings** | 1.5 | Key insights from data exploration |
-| **Model Insights** | 1.5 | Performance analysis, patterns |
-| **Limitations & Future** | 2 | Honest assessment, improvements |
 
 ---
 
@@ -377,6 +335,4 @@ Exclude:
 - See [DEPLOYMENT.md](DEPLOYMENT.md) for how to run
 - See [tests/README.md](tests/README.md) for testing
 
----
 
-**Last Updated**: 2024
