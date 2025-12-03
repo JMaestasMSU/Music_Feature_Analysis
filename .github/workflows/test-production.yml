@@ -16,23 +16,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      
+
       - name: Set up Python 3.9
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-      
+
       - name: Install backend dependencies
         run: |
           cd backend
           pip install --upgrade pip
           pip install -r requirements.txt
-      
+
       - name: Run backend tests
         run: |
           cd backend
           python -m pytest test_api.py -v
-      
+
       - name: Test API health endpoint
         run: |
           cd backend
@@ -44,73 +44,77 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      
+
       - name: Set up Python 3.9
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-      
+
       - name: Install model dependencies (CPU-only)
         run: |
-          cd models
           pip install --upgrade pip
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
           pip install numpy scipy librosa scikit-learn
-      
-      - name: Run CNN architecture test (CPU)
+
+      - name: Run multi-label CNN tests
         run: |
           cd tests
-          python quick_cnn_test.py --cpu-only
-      
-      - name: Run audio processing test
+          python test_multilabel_cnn.py
+
+      - name: Run data augmentation tests
         run: |
           cd tests
-          python quick_audio_processing_test.py
+          python test_augmentation.py
+
+      - name: Run training pipeline tests
+        run: |
+          cd tests
+          python test_training.py
 
   test-integration:
     runs-on: ubuntu-latest
     needs: [test-backend-api, test-model-cpu]
     steps:
       - uses: actions/checkout@v3
-      
+
       - name: Set up Python 3.9
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-      
+
       - name: Install all dependencies
         run: |
           pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install numpy scipy librosa scikit-learn
           cd backend && pip install -r requirements.txt
-      
-      - name: Run integration tests
+
+      - name: Run full test suite
         run: |
           cd tests
-          bash run_all_tests.sh --ci-mode
+          bash run_all_tests.sh
 
-  test-matlab-validation:
+  test-fft-validation:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      
-      - name: Set up Python for NumPy FFT validation
+
+      - name: Set up Python 3.9
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-      
+
       - name: Install dependencies
         run: |
           pip install numpy scipy matplotlib
-      
-      - name: Run Python FFT validation (MATLAB alternative)
+
+      - name: Run Python FFT validation
         run: |
-          cd tests
-          python quick_fft_test.py
-      
+          cd scripts
+          python fft_validation.py
+
       - name: Validate Parseval's theorem
         run: |
-          cd tests
           python -c "
           import numpy as np
           signal = np.random.randn(44100)
