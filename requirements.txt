@@ -1,10 +1,10 @@
 # Music Feature Analysis - Meta Requirements File
-# 
+#
 # This file documents all project dependencies across services
 # For actual installation, use service-specific requirements:
 #
 #   • Backend:     pip install -r backend/requirements.txt
-#   • ML Model:    pip install -r models/app/requirements.txt
+#   • ML Model:    pip install -r app/requirements.txt
 #   • Development: pip install -r requirements-dev.txt
 #
 # DO NOT use this file directly for installation
@@ -24,7 +24,7 @@ python-json-logger
 gunicorn
 
 # ============================================================================
-# ML MODEL SERVER (PyTorch) - See models/app/requirements.txt
+# ML MODEL SERVER (PyTorch) - See app/requirements.txt
 # ============================================================================
 torch
 torchvision

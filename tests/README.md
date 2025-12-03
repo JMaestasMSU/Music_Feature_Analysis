@@ -1,112 +1,75 @@
-# Quick Tests - Music Feature Analysis
+# Tests - Multi-Label CNN System
 
-Fast validation tests that prove core components work (<2 minutes total).
+**Real tests for the actual components you built** (not toy smoke tests).
 
-## Running Tests
+---
 
-**Run all tests:**
+## Quick Start
+
 ```bash
 cd tests/
 bash run_all_tests.sh
 ```
 
-**Run individual tests:**
-```bash
-python quick_fft_test.py              # FFT validation (~10 sec)
-python quick_audio_processing_test.py # Audio processing (~5 sec)
-python quick_cnn_test.py --cpu-only   # Neural network (~30 sec)
-python quick_bayesian_test.py         # Optimization (~30 sec)
-```
-
-## Test Descriptions
-
-### 1. FFT Validation (`quick_fft_test.py`)
-
-**Purpose**: Validates FFT-based feature extraction
-
-**Tests**:
-- Parseval's theorem (time/freq energy equivalence)
-- Spectral centroid computation
-- Spectral rolloff calculation
-- Windowing effects
-
-**Pass criteria**: All assertions pass, error < 1%
+This runs 3 test suites that validate your multi-label CNN system.
 
 ---
 
-### 2. Audio Processing (`quick_audio_processing_test.py`)
+## Test Suites
 
-**Purpose**: Tests librosa-based feature extraction
+### 1. Multi-Label CNN Architecture (`test_multilabel_cnn.py`)
 
-**Tests**:
-- Generate synthetic audio
-- Extract MFCCs
-- Compute spectral features
-- Calculate temporal features
+Tests the **MultiLabelAudioCNN** class and trainer.
 
-**Pass criteria**: Features extracted successfully
+**What it tests:**
+- Architecture scales linearly with genre count
+- Multi-label output has correct shape
+- Residual connections work
+- Channel attention works
+- Embedding extraction works
+- Uses correct loss function
 
----
+### 2. Data Augmentation (`test_augmentation.py`)
 
-### 3. CNN Architecture (`quick_cnn_test.py`)
+Tests **SpecAugment, Mixup**, and the data pipeline.
 
-**Purpose**: Validates neural network can train
+**What it tests:**
+- SpecAugment masks correctly
+- Mixup blends spectrograms
+- Augmentations preserve shape
+- Dataset applies augmentation
+- DataLoaders work
 
-**Tests**:
-- Model instantiation
-- Forward pass
-- Backward pass (training step)
-- Inference mode
+### 3. Training Pipeline (`test_training.py`)
 
-**Pass criteria**: All operations complete without errors
+Tests the **MultiLabelTrainer** and training loop.
 
----
-
-### 4. Bayesian Optimization (`quick_bayesian_test.py`)
-
-**Purpose**: Tests hyperparameter optimization
-
-**Tests**:
-- Optimize synthetic objective function
-- Convergence check
-
-**Pass criteria**: Finds near-optimal solution
+**What it tests:**
+- Trainer initializes correctly
+- Training and validation work
+- Full training loop completes
+- Predictions return correct format
 
 ---
 
-## CI Mode
+## Runtime
 
-For automated testing (less verbose):
-
-```bash
-python quick_fft_test.py --ci
-python quick_cnn_test.py --ci --cpu-only
-```
-
----
-
-## Expected Runtime
-
-| Test | Runtime | Purpose |
-|------|---------|---------|
-| FFT | ~10 sec | Numerical validation |
-| Audio | ~5 sec | Feature extraction |
-| CNN | ~30 sec | Neural network |
-| Bayesian | ~30 sec | Optimization |
-| **Total** | **< 2 min** | Complete validation |
+**Total: ~25 seconds** (17 tests across 3 suites)
 
 ---
 
 ## Troubleshooting
 
-**ModuleNotFoundError**: Install dependencies
+**Missing PyTorch:**
 ```bash
-pip install -r ../requirements.txt
+source ../venv/bin/activate
 ```
 
-**CUDA errors**: Force CPU mode
+**Missing dependencies:**
 ```bash
-python quick_cnn_test.py --cpu-only
+pip install torch numpy scikit-learn
 ```
 
-**Slow tests**: Check CPU usage, close other apps
+---
+
+**You now have real tests for your real code!**

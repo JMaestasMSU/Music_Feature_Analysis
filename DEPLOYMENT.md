@@ -28,8 +28,8 @@ python app.py
 ### 2. Start Model Inference Server
 
 ```bash
-cd models/app/
-python server.py
+cd app/
+python main.py
 
 # Model server runs at: http://localhost:8001
 # Supports: CNN, LSTM, ensemble models

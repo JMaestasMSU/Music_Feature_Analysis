@@ -1,18 +1,18 @@
 #!/bin/bash
 
 echo "========================================================================"
-echo "RUNNING ALL QUICK TESTS - Music Feature Analysis"
+echo "RUNNING ALL TESTS - Multi-Label CNN System"
 echo "========================================================================"
 echo ""
 
-# Determine script directory (works on macOS, Linux, Windows Git Bash)
+# Determine script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 TESTS_PASSED=0
 TESTS_FAILED=0
 
-# Determine Python command (python3 on macOS/Linux, python on Windows)
+# Determine Python command
 if command -v python3 &> /dev/null; then
     PYTHON_CMD="python3"
 else
@@ -22,36 +22,27 @@ fi
 echo "Using Python: $PYTHON_CMD"
 echo ""
 
-# Test 1: FFT Validation
-echo "[1/4] Running FFT validation test..."
-if $PYTHON_CMD quick_fft_test.py; then
+# Test 1: Multi-Label CNN Architecture
+echo "[1/3] Testing Multi-Label CNN Architecture..."
+if $PYTHON_CMD test_multilabel_cnn.py; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
     TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 echo ""
 
-# Test 2: Audio Processing
-echo "[2/4] Running audio processing test..."
-if $PYTHON_CMD quick_audio_processing_test.py; then
+# Test 2: Data Augmentation
+echo "[2/3] Testing Data Augmentation..."
+if $PYTHON_CMD test_augmentation.py; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
     TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 echo ""
 
-# Test 3: CNN Architecture
-echo "[3/4] Running CNN architecture test..."
-if $PYTHON_CMD quick_cnn_test.py --cpu-only; then
-    TESTS_PASSED=$((TESTS_PASSED + 1))
-else
-    TESTS_FAILED=$((TESTS_FAILED + 1))
-fi
-echo ""
-
-# Test 4: Bayesian Optimization
-echo "[4/4] Running Bayesian optimization test..."
-if $PYTHON_CMD quick_bayesian_test.py; then
+# Test 3: Training Pipeline
+echo "[3/3] Testing Training Pipeline..."
+if $PYTHON_CMD test_training.py; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
     TESTS_FAILED=$((TESTS_FAILED + 1))
@@ -60,19 +51,29 @@ echo ""
 
 # Summary
 echo "========================================================================"
-echo "TEST SUMMARY"
+echo "FINAL TEST SUMMARY"
 echo "========================================================================"
-echo "Passed: $TESTS_PASSED / 4"
-echo "Failed: $TESTS_FAILED / 4"
+echo "Passed: $TESTS_PASSED / 3"
+echo "Failed: $TESTS_FAILED / 3"
+echo ""
 
 if [ $TESTS_FAILED -eq 0 ]; then
+    echo " ALL TESTS PASSED!"
     echo ""
-    echo "[OK] All tests passed! "
+    echo "Your multi-label CNN system is working correctly:"
+    echo "  Architecture scales with genre count"
+    echo "  Multi-label predictions work"
+    echo "  Data augmentation preserves shapes"
+    echo "  Training pipeline completes"
     echo "========================================================================"
     exit 0
 else
+    echo " SOME TESTS FAILED"
     echo ""
-    echo "[FAIL] Some tests failed "
+    echo "Troubleshooting:"
+    echo "  - Missing PyTorch? Activate venv: source ../venv/bin/activate"
+    echo "  - Missing dependencies? Install: pip install -r ../requirements.txt"
+    echo "  - Check error messages above for details"
     echo "========================================================================"
     exit 1
 fi
