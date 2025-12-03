@@ -1,0 +1,34 @@
+# Baseline Configuration: 8 Genres (Original Project)
+# For comparison with original notebook deliverables
+
+# Data configuration
+data_dir: "data/processed"
+spectrogram_file: "spectrograms.npy"
+labels_file: "labels.npy"
+genre_names_file: "genre_names.json"
+
+# Model architecture - smaller for quick experiments
+num_genres: 8
+base_channels: 32
+use_attention: false
+multi_label: false
+
+# Training hyperparameters - faster convergence
+epochs: 50
+batch_size: 64
+lr: 0.001
+weight_decay: 0.00001
+patience: 10
+
+# Data splits
+train_split: 0.6
+val_split: 0.2
+test_split: 0.2
+
+# Hardware
+device: "auto"
+num_workers: 2
+
+# Output
+output_dir: "models/trained_models"
+experiment_name: "baseline_8genres"

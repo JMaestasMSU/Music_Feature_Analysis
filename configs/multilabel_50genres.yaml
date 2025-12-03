@@ -1,0 +1,34 @@
+# Multi-label CNN Configuration: 50 Genres
+# Example config for training on expanded genre taxonomy
+
+# Data configuration
+data_dir: "data/processed"
+spectrogram_file: "spectrograms.npy"
+labels_file: "labels_multilabel.npy"
+genre_names_file: "genre_names_50.json"
+
+# Model architecture
+num_genres: 50
+base_channels: 64
+use_attention: true
+multi_label: true
+
+# Training hyperparameters
+epochs: 100
+batch_size: 32
+lr: 0.001
+weight_decay: 0.00001
+patience: 15
+
+# Data splits
+train_split: 0.6
+val_split: 0.2
+test_split: 0.2
+
+# Hardware
+device: "auto"  # auto-detect GPU
+num_workers: 4
+
+# Output
+output_dir: "models/trained_models"
+experiment_name: "resnet_50genres_v1"

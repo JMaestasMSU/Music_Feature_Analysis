@@ -370,6 +370,54 @@ async def get_model_info():
     }
 
 
+# Add new endpoint for multi-label prediction
+@app.post("/api/v1/analysis/predict-multilabel")
+async def predict_multilabel(file: UploadFile = File(...), threshold: float = 0.3):
+    """
+    Multi-label genre classification endpoint.
+    
+    Args:
+        file: Audio file (WAV, MP3, FLAC)
+        threshold: Probability threshold for genre inclusion (default: 0.3)
+    
+    Returns:
+        List of genres with probabilities above threshold
+    """
+    try:
+        # Save uploaded file temporarily
+        temp_path = f"/tmp/{file.filename}"
+        with open(temp_path, "wb") as f:
+            f.write(await file.read())
+        
+        # Extract features (spectrogram)
+        # TODO: Implement feature extraction
+        features = extract_spectrogram(temp_path)
+        
+        # Call model server for prediction
+        # TODO: Implement model server call
+        predictions = call_model_server(features, mode="multilabel")
+        
+        # Filter by threshold
+        results = []
+        for genre, prob in predictions.items():
+            if prob >= threshold:
+                results.append({"genre": genre, "probability": float(prob)})
+        
+        # Sort by probability
+        results.sort(key=lambda x: x["probability"], reverse=True)
+        
+        return {
+            "status": "success",
+            "file": file.filename,
+            "threshold": threshold,
+            "genres": results,
+            "num_genres": len(results)
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ============================================================================
 # Main Entry Point
 # ============================================================================
