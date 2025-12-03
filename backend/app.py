@@ -9,6 +9,7 @@ from typing import List, Optional, Dict, Any, cast
 import tempfile
 import os
 import pickle
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -69,6 +70,8 @@ class PredictionResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     """Health check response."""
+    model_config = {"protected_namespaces": ()}
+
     status: str
     app_name: str
     version: str
