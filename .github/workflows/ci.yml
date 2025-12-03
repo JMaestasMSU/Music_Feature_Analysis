@@ -115,9 +115,9 @@ jobs:
           assert error < 1, 'FFT validation failed'
           "
 
-  # Job 4: Integration Tests (runs after all other tests pass)
-  test-integration:
-    name: Integration Tests
+  # Job 4: End-to-End Integration Tests (runs after all other tests pass)
+  test-e2e:
+    name: End-to-End Integration Tests
     runs-on: ubuntu-latest
     needs: [test-cnn, test-backend, test-fft]
     steps:
@@ -132,13 +132,71 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-          pip install numpy scipy librosa scikit-learn matplotlib
+          pip install numpy scipy librosa scikit-learn matplotlib seaborn
           cd backend && pip install -r requirements.txt
 
-      - name: Run full test suite
+      - name: Start backend API
         run: |
-          cd tests
-          bash run_all_tests.sh
+          cd backend
+          python app.py &
+          sleep 10
+          echo "API started"
+
+      - name: Test complete prediction pipeline
+        run: |
+          python -c "
+          import requests
+          import numpy as np
+
+          # Test 1: Health check
+          r = requests.get('http://localhost:8000/health')
+          assert r.status_code == 200, 'Health check failed'
+          assert r.json()['status'] == 'healthy', 'API not healthy'
+          print('✓ Health check passed')
+
+          # Test 2: Get genres
+          r = requests.get('http://localhost:8000/genres')
+          assert r.status_code == 200, 'Get genres failed'
+          genres = r.json()['genres']
+          assert len(genres) > 0, 'No genres returned'
+          print(f'✓ Got {len(genres)} genres')
+
+          # Test 3: Feature-based prediction
+          features = np.random.randn(20).tolist()
+          r = requests.post('http://localhost:8000/predict', json={
+              'features': features,
+              'return_probs': True,
+              'top_k': 3
+          })
+          assert r.status_code == 200, 'Prediction failed'
+          result = r.json()
+          assert 'predicted_genre' in result, 'No prediction returned'
+          assert result['predicted_genre'] in genres, 'Invalid genre predicted'
+          print(f'✓ Prediction: {result[\"predicted_genre\"]} ({result[\"confidence\"]:.2f})')
+
+          # Test 4: Batch prediction
+          batch = [
+              {'features': np.random.randn(20).tolist(), 'top_k': 1}
+              for _ in range(5)
+          ]
+          r = requests.post('http://localhost:8000/batch-predict', json=batch)
+          assert r.status_code == 200, 'Batch prediction failed'
+          results = r.json()
+          assert len(results) == 5, 'Wrong number of results'
+          print(f'✓ Batch prediction: {len(results)} samples processed')
+
+          print('\\n✓ All E2E integration tests passed!')
+          "
+
+      - name: Test model info endpoint
+        run: |
+          curl -f http://localhost:8000/model/info | python -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          assert data['status'] == 'loaded', 'Model not loaded'
+          assert data['num_classes'] > 0, 'Invalid num_classes'
+          print(f'✓ Model info: {data[\"num_classes\"]} classes on {data[\"device\"]}')
+          "
 
   # Job 5: Code Quality (runs in parallel, non-blocking)
   code-quality:
