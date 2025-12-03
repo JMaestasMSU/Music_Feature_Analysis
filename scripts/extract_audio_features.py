@@ -113,7 +113,9 @@ def save_spectrogram_example(track_id, mel_spec, genre, save_dir):
     ax.set_ylabel('Frequency (Hz)')
     fig.colorbar(img, ax=ax, format='%+2.0f dB')
 
-    save_path = save_dir / f'{genre}_track_{track_id}.png'
+    # Sanitize genre name for use in filename (remove invalid characters)
+    safe_genre = genre.replace('/', '-').replace('\\', '-').replace(' ', '_')
+    save_path = save_dir / f'{safe_genre}_track_{track_id}.png'
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()

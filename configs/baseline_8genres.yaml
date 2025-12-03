@@ -27,7 +27,7 @@ test_split: 0.2
 
 # Hardware
 device: "auto"
-num_workers: 2
+num_workers: 0
 
 # Output
 output_dir: "models/trained_models"

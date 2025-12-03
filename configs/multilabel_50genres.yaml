@@ -27,7 +27,7 @@ test_split: 0.2
 
 # Hardware
 device: "auto"  # auto-detect GPU
-num_workers: 4
+num_workers: 0  # Use 0 on Windows to avoid multiprocessing issues
 
 # Output
 output_dir: "models/trained_models"

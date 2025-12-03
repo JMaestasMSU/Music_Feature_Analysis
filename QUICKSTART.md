@@ -25,10 +25,10 @@ cd Music_Feature_Analysis
 pip install requests tqdm
 
 # Download FMA Medium dataset (~25GB) and setup directories
-python scripts/setup_fma_dataset.py
+python scripts/download_fma_medium.py
 
 # If you already have the dataset downloaded:
-python scripts/setup_fma_dataset.py --skip-download
+python scripts/download_fma_medium.py --skip-download
 ```
 
 **What this does:**

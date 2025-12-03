@@ -307,7 +307,7 @@ docker-compose run --user $(id -u):$(id -g) backend
 
 ### 1. Setup Dataset
 ```bash
-python scripts/setup_fma_dataset.py
+python scripts/download_fma_medium.py
 ```
 
 ### 2. Extract Features

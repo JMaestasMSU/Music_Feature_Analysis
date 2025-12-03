@@ -47,10 +47,10 @@ def parse_args():
                        help='Number of genre classes')
     parser.add_argument('--base-channels', type=int, default=64,
                        help='Base number of CNN channels')
-    parser.add_argument('--use-attention', action='store_true', default=True,
-                       help='Use channel attention')
-    parser.add_argument('--multi-label', action='store_true', default=True,
-                       help='Multi-label classification (songs can have multiple genres)')
+    parser.add_argument('--use-attention', type=lambda x: str(x).lower() == 'true', default=True,
+                       help='Use channel attention (true/false)')
+    parser.add_argument('--multi-label', type=lambda x: str(x).lower() == 'true', default=True,
+                       help='Multi-label classification (true/false)')
 
     # Training arguments
     parser.add_argument('--epochs', type=int, default=100,
@@ -75,8 +75,8 @@ def parse_args():
     # Hardware arguments
     parser.add_argument('--device', type=str, default='auto',
                        help='Device to use (auto, cpu, cuda, mps)')
-    parser.add_argument('--num-workers', type=int, default=4,
-                       help='Number of data loading workers')
+    parser.add_argument('--num-workers', type=int, default=0,
+                       help='Number of data loading workers (use 0 on Windows)')
 
     # Output arguments
     parser.add_argument('--output-dir', type=str, default='models/trained_models',

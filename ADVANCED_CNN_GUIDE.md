@@ -25,8 +25,6 @@ cd backend
 python app.py
 ```
 
-That's it! No code changes needed to scale from 8 → 50 → 100+ genres.
-
 ---
 
 ## What's New vs. Baseline
@@ -611,8 +609,6 @@ use_amp: true
 ---
 
 ## Summary
-
-You now have:
 - **Multi-label CNN** that handles unlimited genres
 - **Production training pipeline** with augmentation
 - **Config-based experiments** for easy iteration
@@ -621,5 +617,3 @@ You now have:
 - **Scalable architecture** (8 → 200+ genres)
 
 **No more being stuck on 8 predetermined genres!**
-
-Build something amazing!

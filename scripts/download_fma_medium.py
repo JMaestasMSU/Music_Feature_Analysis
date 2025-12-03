@@ -6,7 +6,7 @@ Downloads, extracts, and organizes the FMA Medium dataset for local training.
 Ensures proper directory structure and validates data integrity.
 
 Usage:
-    python scripts/setup_fma_dataset.py [--skip-download]
+    python scripts/download_fma_medium.py [--skip-download]
 
 The FMA Medium dataset is ~25GB and contains 25,000 tracks.
 """
