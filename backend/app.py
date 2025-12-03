@@ -20,7 +20,7 @@ import numpy as np
 # Add parent directory for imports
 sys.path.append(str(Path(__file__).parent.parent))
 
-from preprocessing.feature_extraction import extract_features, features_to_array
+from scripts.feature_extraction import extract_features, features_to_array
 from models.genre_classifier import GenreClassifier, ModelWrapper
 from models.model_utils import load_production_model
 
