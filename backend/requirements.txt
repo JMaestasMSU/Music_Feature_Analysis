@@ -14,8 +14,8 @@ numpy>=1.24.0
 torch>=2.0.0
 torchvision==0.15.2
 
-# MATLAB Integration
-matlab-engine==23.2  # Optional: install via MATLAB
+# MATLAB Integration (Optional - not required for CI/CD)
+# matlab-engine==23.2  # Install manually via MATLAB if needed
 
 # Data Processing
 pandas>=2.0.0
