@@ -374,7 +374,3 @@ unzip fma_small.zip
 ## License
 
 Academic use only (CS 3120 project)
-
----
-
-**From academic exercise → production ML system! **
