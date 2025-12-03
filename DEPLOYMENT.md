@@ -13,9 +13,184 @@ This guide covers deploying the music feature analysis system in various environ
 
 ---
 
-## Local Development Deployment
+## Quick Start - Local Deployment with Docker
 
-### 1. Start Backend API
+### Prerequisites
+
+- Docker and Docker Compose installed
+- At least 50GB free disk space (for FMA Medium dataset)
+- (Optional) NVIDIA GPU with CUDA support for training
+
+### Step 1: Setup Dataset and Directory Structure
+
+```bash
+# Install Python dependencies
+pip install requests tqdm
+
+# Run the setup script to download FMA Medium dataset (~25GB)
+python scripts/download_fma_medium.py
+
+# This will:
+# - Create directory structure (data/raw, data/processed, data/metadata)
+# - Download FMA Medium dataset (25,000 tracks, ~25GB)
+# - Download FMA metadata (~342MB)
+# - Extract and organize files
+# - Validate dataset structure
+
+# If you already have the files downloaded:
+python scripts/download_fma_medium.py --skip-download
+```
+
+### Step 2: Extract Audio Features
+
+```bash
+# Using Docker (recommended)
+docker-compose --profile preprocessing up feature-extraction
+
+# Or locally (requires conda environment)
+python scripts/extract_audio_features.py
+
+# This will:
+# - Process all audio files in data/raw/
+# - Extract mel-spectrograms and audio features
+# - Save to data/processed/extracted_features.pkl
+# - Create spectrograms in data/processed/spectrograms/
+```
+
+### Step 3: Train the Model
+
+```bash
+# Using Docker with GPU support (recommended for training)
+docker-compose --profile training up training
+
+# Or locally (requires conda environment and GPU)
+python scripts/train_multilabel_cnn.py
+
+# This will:
+# - Load extracted features from data/processed/
+# - Train multi-label CNN model
+# - Save best model to models/trained_models/multilabel_cnn_best.pt
+# - Generate training plots in outputs/
+# - Log metrics to logs/
+```
+
+### Step 4: Start the Backend API
+
+```bash
+# Start only the backend API service
+docker-compose up backend
+
+# Or start all services (backend + model inference)
+docker-compose --profile full up
+
+# Backend API will be available at:
+# - http://localhost:8000
+# - Swagger docs: http://localhost:8000/docs
+# - ReDoc: http://localhost:8000/redoc
+
+# Model inference service (if using --profile full):
+# - http://localhost:8001
+```
+
+### Step 5: Test the API
+
+```bash
+# Health check
+curl http://localhost:8000/health
+
+# Get available genres
+curl http://localhost:8000/genres
+
+# Test prediction with random features
+curl -X POST http://localhost:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{"features": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0,
+                    1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0],
+       "top_k": 3}'
+
+# Or run the test suite
+cd backend
+python -m pytest test_api.py -v
+```
+
+### Step 6: Upload and Analyze Audio Files
+
+Upload audio files through the Swagger UI at [http://localhost:8000/docs](http://localhost:8000/docs):
+
+1. Navigate to POST `/predict-from-audio`
+2. Click "Try it out"
+3. Upload an audio file (MP3, WAV, FLAC)
+4. Set `top_k` (e.g., 5 for top 5 genres)
+5. Click "Execute"
+
+Or use curl:
+
+```bash
+curl -X POST http://localhost:8000/predict-from-audio \
+  -F "file=@/path/to/your/song.mp3" \
+  -F "top_k=5"
+```
+
+### Managing Docker Services
+
+```bash
+# View running containers
+docker-compose ps
+
+# View logs
+docker-compose logs -f backend
+docker-compose logs -f training
+
+# Stop services
+docker-compose down
+
+# Rebuild after code changes
+docker-compose build backend
+docker-compose up backend
+
+# Remove all containers and volumes
+docker-compose down -v
+```
+
+---
+
+## Local Development (Without Docker)
+
+### 1. Setup Conda Environment
+
+```bash
+# Create environment
+conda env create -f environments/environment.yml
+
+# Or for GPU training:
+conda env create -f environments/environment-gpu-cuda11.8.yml
+
+# Or for CPU-only:
+conda env create -f environments/environment-cpu.yml
+
+# Activate environment
+conda activate music-feature-analysis
+```
+
+### 2. Setup Dataset
+
+```bash
+python scripts/download_fma_medium.py
+```
+
+### 3. Extract Features
+
+```bash
+python scripts/extract_audio_features.py
+```
+
+### 4. Train Model
+
+```bash
+python scripts/train_multilabel_cnn.py
+```
+
+### 5. Start Backend API
 
 ```bash
 cd backend/
@@ -25,7 +200,7 @@ python app.py
 # Docs: http://localhost:8000/docs
 ```
 
-### 2. Start Model Inference Server
+### 6. (Optional) Start Model Inference Server
 
 ```bash
 cd app/
@@ -35,51 +210,15 @@ python main.py
 # Supports: CNN, LSTM, ensemble models
 ```
 
-### 3. Test API
+### 7. Test API
 
 ```bash
 # Health check
-curl http://localhost:8000/api/v1/health
+curl http://localhost:8000/health
 
-# Test multi-label prediction
-python backend/test_api.py
-```
-
----
-
-## Docker Deployment
-
-### 1. Build Containers
-
-```bash
-cd docker/
-docker-compose build
-```
-
-### 2. Start Services
-
-```bash
-docker-compose up -d
-```
-
-### 3. Verify Running
-
-```bash
-docker-compose ps
-docker-compose logs -f backend
-```
-
-### 4. Test Endpoints
-
-```bash
-curl http://localhost:8000/api/v1/health
-curl http://localhost:8001/health
-```
-
-### 5. Stop Services
-
-```bash
-docker-compose down
+# Run test suite
+cd backend
+python -m pytest test_api.py -v
 ```
 
 ---

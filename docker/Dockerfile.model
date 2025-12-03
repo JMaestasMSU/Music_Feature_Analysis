@@ -24,7 +24,10 @@ SHELL ["conda", "run", "-n", "music-feature-analysis", "/bin/bash", "-c"]
 # Copy application
 COPY app/ /app/app/
 COPY models/ /app/models/
-COPY preprocessing/ /app/preprocessing/
+COPY scripts/ /app/scripts/
+
+# Set Python path
+ENV PYTHONPATH=/app
 
 EXPOSE 8001
 

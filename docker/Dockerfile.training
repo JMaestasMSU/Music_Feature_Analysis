@@ -1,7 +1,7 @@
 FROM continuumio/miniconda3:latest
 
 LABEL maintainer="Jarred Maestas"
-LABEL description="Music Genre Classification Backend API"
+LABEL description="Music Genre Classification Training Service"
 
 # Set working directory
 WORKDIR /app
@@ -12,8 +12,8 @@ RUN apt-get update && apt-get install -y \
     libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy conda environment file
-COPY environments/environment.yml /app/environment.yml
+# Copy conda environment file (use GPU version for training)
+COPY environments/environment-gpu-cuda11.8.yml /app/environment.yml
 
 # Create conda environment
 RUN conda env create -f environment.yml && \
@@ -23,19 +23,12 @@ RUN conda env create -f environment.yml && \
 SHELL ["conda", "run", "-n", "music-feature-analysis", "/bin/bash", "-c"]
 
 # Copy application code
-COPY backend/ /app/backend/
 COPY scripts/ /app/scripts/
 COPY models/ /app/models/
+COPY tests/ /app/tests/
 
 # Set Python path
 ENV PYTHONPATH=/app
 
-# Expose port
-EXPOSE 8000
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD conda run -n music-feature-analysis python -c "import requests; requests.get('http://localhost:8000/health')"
-
-# Run application with conda
-CMD ["conda", "run", "--no-capture-output", "-n", "music-feature-analysis", "uvicorn", "backend.app:app", "--host", "0.0.0.0", "--port", "8000"]
+# Default command: train the multi-label CNN model
+CMD ["conda", "run", "--no-capture-output", "-n", "music-feature-analysis", "python", "scripts/train_multilabel_cnn.py"]

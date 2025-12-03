@@ -1,0 +1,104 @@
+version: '3.8'
+
+services:
+  # Backend API Service (FastAPI with audio upload)
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: music-analysis-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data:ro  # Read-only access to data
+      - ./models/trained_models:/app/models/trained_models:ro  # Read-only trained models
+      - ./logs:/app/logs  # Write access for logs
+    environment:
+      - PYTHONUNBUFFERED=1
+      - MODEL_PATH=/app/models/trained_models/multilabel_cnn_best.pt
+      - LOG_LEVEL=INFO
+    networks:
+      - music-analysis-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Model Inference Service (Alternative lightweight API)
+  model:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.model
+    container_name: music-analysis-model
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./data:/app/data:ro  # Read-only access to data
+      - ./models/trained_models:/app/models/trained_models:ro  # Read-only trained models
+      - ./logs:/app/logs  # Write access for logs
+    environment:
+      - PYTHONUNBUFFERED=1
+      - MODEL_PATH=/app/models/trained_models/multilabel_cnn_best.pt
+      - LOG_LEVEL=INFO
+    networks:
+      - music-analysis-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    profiles:
+      - full  # Only start with full profile
+
+  # Training Service
+  training:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.training
+    container_name: music-analysis-training
+    volumes:
+      - ./data:/app/data  # Read-write access to process data
+      - ./models/trained_models:/app/models/trained_models  # Write access for trained models
+      - ./outputs:/app/outputs  # Write access for outputs
+      - ./logs:/app/logs  # Write access for logs
+    environment:
+      - PYTHONUNBUFFERED=1
+      - CUDA_VISIBLE_DEVICES=0  # Use GPU 0 if available
+    networks:
+      - music-analysis-net
+    # Training service runs once and exits
+    # Use: docker-compose up training --build to retrain
+    profiles:
+      - training  # Only start when explicitly requested
+
+  # Feature Extraction Service
+  feature-extraction:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.feature-extraction
+    container_name: music-analysis-feature-extraction
+    volumes:
+      - ./data:/app/data  # Read-write access to process data
+      - ./logs:/app/logs  # Write access for logs
+    environment:
+      - PYTHONUNBUFFERED=1
+    networks:
+      - music-analysis-net
+    # Feature extraction runs once and exits
+    profiles:
+      - preprocessing  # Only start when explicitly requested
+
+networks:
+  music-analysis-net:
+    driver: bridge
+
+volumes:
+  data:
+  models:
+  outputs:
+  logs:
