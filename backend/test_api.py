@@ -4,9 +4,7 @@ Tests all endpoints with synthetic data.
 """
 
 import requests
-import json
 import numpy as np
-from pathlib import Path
 import sys
 
 # API base URL
