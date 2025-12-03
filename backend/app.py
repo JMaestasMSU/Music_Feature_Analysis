@@ -49,23 +49,74 @@ config = Config()
 
 class PredictionRequest(BaseModel):
     """Request model for direct feature prediction."""
-    features: List[float] = Field(..., min_length=20, max_length=20)
-    return_probs: bool = False
-    top_k: int = Field(default=3, ge=1, le=8)
+    features: List[float] = Field(
+        ...,
+        min_length=20,
+        max_length=20,
+        description="Array of 20 audio features (13 MFCCs + spectral centroid + spectral rolloff + ZCR + RMS energy + 3 chroma features)",
+        examples=[[0.1, -0.5, 0.3, 0.2, -0.1, 0.4, 0.0, -0.2, 0.1, 0.3, -0.4, 0.2, 0.1, 1500.5, 3200.1, 0.05, 0.02, 0.3, 0.4, 0.3]]
+    )
+    return_probs: bool = Field(
+        default=False,
+        description="Whether to return probabilities for all genres"
+    )
+    top_k: int = Field(
+        default=3,
+        ge=1,
+        le=8,
+        description="Number of top predictions to return (1-8)"
+    )
 
 
 class TopPrediction(BaseModel):
     """Single top prediction."""
-    genre: str
-    confidence: float
+    genre: str = Field(description="Genre name")
+    confidence: float = Field(description="Confidence score (0.0-1.0)", ge=0.0, le=1.0)
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {"genre": "Rock", "confidence": 0.85}
+            ]
+        }
+    }
 
 
 class PredictionResponse(BaseModel):
     """Response model for predictions."""
-    predicted_genre: str
-    confidence: float
-    top_predictions: List[TopPrediction]
-    all_probabilities: Optional[Dict[str, float]] = None
+    predicted_genre: str = Field(description="Most likely genre")
+    confidence: float = Field(description="Confidence of top prediction (0.0-1.0)", ge=0.0, le=1.0)
+    top_predictions: List[TopPrediction] = Field(description="Top K genre predictions ranked by confidence")
+    all_probabilities: Optional[Dict[str, float]] = Field(
+        default=None,
+        description="Probabilities for all genres (only if return_probs=true)"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "predicted_genre": "Rock",
+                    "confidence": 0.85,
+                    "top_predictions": [
+                        {"genre": "Rock", "confidence": 0.85},
+                        {"genre": "Pop", "confidence": 0.10},
+                        {"genre": "Electronic", "confidence": 0.03}
+                    ],
+                    "all_probabilities": {
+                        "Rock": 0.85,
+                        "Pop": 0.10,
+                        "Electronic": 0.03,
+                        "Hip-Hop": 0.01,
+                        "Classical": 0.005,
+                        "Jazz": 0.003,
+                        "Folk": 0.001,
+                        "Experimental": 0.001
+                    }
+                }
+            ]
+        }
+    }
 
 
 class HealthResponse(BaseModel):
@@ -156,10 +207,44 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=config.APP_NAME,
     version=config.VERSION,
-    description="REST API for music genre classification using neural networks",
+    description="""
+## Music Genre Classification API
+
+A production-ready REST API for music genre classification using deep learning.
+
+### Features
+* **Feature-based Prediction**: Classify music from pre-extracted audio features
+* **Audio File Analysis**: Upload audio files for automatic feature extraction and classification
+* **Batch Processing**: Process multiple samples in a single request
+* **Model Information**: Access model metadata and supported genres
+
+### Supported Audio Formats
+MP3, WAV, AU, FLAC, OGG
+
+### Model Architecture
+* Deep neural network trained on audio features
+* 20 input features (MFCCs, spectral features, chroma, etc.)
+* 8 music genres supported
+
+### Quick Start
+1. Check API health: `GET /health`
+2. View supported genres: `GET /genres`
+3. Classify audio: `POST /analyze-audio` or `POST /predict`
+
+### Documentation
+* **Swagger UI**: [/docs](/docs)
+* **ReDoc**: [/redoc](/redoc)
+    """,
     docs_url="/docs",
     redoc_url="/redoc",
-    lifespan=lifespan
+    lifespan=lifespan,
+    contact={
+        "name": "Music Genre Classification API",
+        "url": "https://github.com/yourusername/Music_Feature_Analysis",
+    },
+    license_info={
+        "name": "MIT License",
+    }
 )
 
 # CORS middleware
@@ -176,9 +261,18 @@ app.add_middleware(
 # API Endpoints
 # ============================================================================
 
-@app.get("/", tags=["Root"])
+@app.get(
+    "/",
+    tags=["Root"],
+    summary="API Root",
+    description="Get API information and navigation links"
+)
 async def root():
-    """Root endpoint with API information."""
+    """
+    # Welcome to Music Genre Classification API
+
+    Returns basic API information and links to documentation.
+    """
     return {
         "message": f"Welcome to {config.APP_NAME}",
         "version": config.VERSION,
@@ -187,9 +281,24 @@ async def root():
     }
 
 
-@app.get("/health", response_model=HealthResponse, tags=["Health"])
+@app.get(
+    "/health",
+    response_model=HealthResponse,
+    tags=["Health"],
+    summary="Health Check",
+    description="Check API health status and model availability"
+)
 async def health_check():
-    """Health check endpoint."""
+    """
+    # Health Check Endpoint
+
+    Returns the current health status of the API, including:
+    - Overall API status
+    - Model loading status
+    - Compute device being used (CPU/CUDA)
+
+    **Use this endpoint** to verify the API is running before making predictions.
+    """
     return HealthResponse(
         status="healthy" if model_wrapper is not None else "unhealthy",
         app_name=config.APP_NAME,
@@ -199,16 +308,66 @@ async def health_check():
     )
 
 
-@app.post("/predict", response_model=PredictionResponse, tags=["Prediction"])
+@app.post(
+    "/predict",
+    response_model=PredictionResponse,
+    tags=["Prediction"],
+    summary="Predict Genre from Features",
+    description="Classify music genre using pre-extracted audio features",
+    responses={
+        200: {
+            "description": "Successful prediction",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "predicted_genre": "Rock",
+                        "confidence": 0.85,
+                        "top_predictions": [
+                            {"genre": "Rock", "confidence": 0.85},
+                            {"genre": "Pop", "confidence": 0.10},
+                            {"genre": "Electronic", "confidence": 0.03}
+                        ]
+                    }
+                }
+            }
+        },
+        422: {"description": "Validation error - invalid features"},
+        503: {"description": "Model not loaded"}
+    }
+)
 async def predict_from_features(request: PredictionRequest):
     """
-    Predict genre from pre-extracted features.
-    
-    Args:
-        request: PredictionRequest with 20 audio features
-    
-    Returns:
-        PredictionResponse with genre prediction and confidence
+    # Predict Genre from Audio Features
+
+    Classify music genre using 20 pre-extracted audio features.
+
+    ## Required Features (in order):
+    1-13. **MFCC coefficients** (Mel-frequency cepstral coefficients)
+    14. **Spectral centroid** - brightness of the sound
+    15. **Spectral rolloff** - shape of the signal
+    16. **Zero crossing rate** - percussiveness
+    17. **RMS energy** - loudness
+    18-20. **Chroma features** - harmonic content (3 values)
+
+    ## Example Usage:
+    ```python
+    import requests
+
+    features = [0.1, -0.5, 0.3, ..., 0.4, 0.3]  # 20 features
+    response = requests.post(
+        "http://localhost:8000/predict",
+        json={
+            "features": features,
+            "return_probs": True,
+            "top_k": 3
+        }
+    )
+    ```
+
+    ## Parameters:
+    - **features**: Array of exactly 20 float values
+    - **return_probs**: Set to `true` to get probabilities for all genres
+    - **top_k**: Number of top predictions to return (1-8)
     """
     if model_wrapper is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
@@ -230,22 +389,67 @@ async def predict_from_features(request: PredictionRequest):
         raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
 
 
-@app.post("/analyze-audio", response_model=AudioAnalysisResponse, tags=["Audio Analysis"])
+@app.post(
+    "/analyze-audio",
+    response_model=AudioAnalysisResponse,
+    tags=["Audio Analysis"],
+    summary="Analyze Audio File",
+    description="Upload an audio file for automatic feature extraction and genre classification",
+    responses={
+        200: {"description": "Analysis complete with genre prediction"},
+        400: {"description": "Invalid file type or missing filename"},
+        413: {"description": "File too large (max 50MB)"},
+        500: {"description": "Feature extraction or prediction failed"},
+        503: {"description": "Model not loaded"}
+    }
+)
 async def analyze_audio_file(
-    file: UploadFile = File(...),
+    file: UploadFile = File(..., description="Audio file to analyze"),
     return_probs: bool = False,
     top_k: int = 3
 ):
     """
-    Analyze uploaded audio file and predict genre.
-    
-    Args:
-        file: Audio file (mp3, wav, au, flac, ogg)
-        return_probs: Whether to return all genre probabilities
-        top_k: Number of top predictions to return
-    
-    Returns:
-        AudioAnalysisResponse with features and prediction
+    # Analyze Audio File and Predict Genre
+
+    Upload an audio file and get automatic genre classification.
+
+    ## Process:
+    1. **Upload** audio file (MP3, WAV, AU, FLAC, OGG)
+    2. **Extract** 20 audio features automatically using librosa
+    3. **Predict** genre using trained neural network
+    4. **Return** prediction results and extracted features
+
+    ## Supported Formats:
+    - MP3
+    - WAV
+    - AU
+    - FLAC
+    - OGG
+
+    ## Constraints:
+    - **Max file size**: 50 MB
+    - **Duration**: First 30 seconds analyzed
+    - **Sample rate**: Resampled to 22,050 Hz
+
+    ## Example Usage (curl):
+    ```bash
+    curl -X POST "http://localhost:8000/analyze-audio" \\
+      -F "file=@song.mp3" \\
+      -F "return_probs=true" \\
+      -F "top_k=3"
+    ```
+
+    ## Example Usage (Python):
+    ```python
+    import requests
+
+    with open("song.mp3", "rb") as f:
+        response = requests.post(
+            "http://localhost:8000/analyze-audio",
+            files={"file": f},
+            params={"return_probs": True, "top_k": 3}
+        )
+    ```
     """
     if model_wrapper is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
@@ -312,16 +516,54 @@ async def analyze_audio_file(
         raise HTTPException(status_code=500, detail=f"Audio analysis failed: {str(e)}")
 
 
-@app.post("/batch-predict", tags=["Batch Operations"])
+@app.post(
+    "/batch-predict",
+    tags=["Batch Operations"],
+    summary="Batch Genre Prediction",
+    description="Predict genres for multiple audio feature sets in a single request",
+    responses={
+        200: {"description": "Batch prediction successful"},
+        400: {"description": "Batch size exceeds limit (max 100)"},
+        503: {"description": "Model not loaded"}
+    }
+)
 async def batch_predict(requests: List[PredictionRequest]):
     """
-    Batch prediction for multiple feature sets.
-    
-    Args:
-        requests: List of PredictionRequest objects
-    
-    Returns:
-        List of PredictionResponse objects
+    # Batch Genre Prediction
+
+    Classify multiple audio samples efficiently in a single API call.
+
+    ## Benefits:
+    - **Reduced latency**: Single network call for multiple predictions
+    - **Efficient processing**: Batch inference optimization
+    - **Bulk analysis**: Process entire playlists or albums
+
+    ## Constraints:
+    - **Maximum batch size**: 100 samples per request
+    - Each sample requires exactly 20 features
+
+    ## Example Usage:
+    ```python
+    import requests
+
+    batch = [
+        {
+            "features": [0.1, -0.5, ..., 0.3],  # Song 1
+            "return_probs": False,
+            "top_k": 1
+        },
+        {
+            "features": [0.2, -0.3, ..., 0.4],  # Song 2
+            "return_probs": False,
+            "top_k": 1
+        }
+    ]
+
+    response = requests.post(
+        "http://localhost:8000/batch-predict",
+        json=batch
+    )
+    ```
     """
     if model_wrapper is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
@@ -346,24 +588,81 @@ async def batch_predict(requests: List[PredictionRequest]):
         raise HTTPException(status_code=500, detail=f"Batch prediction failed: {str(e)}")
 
 
-@app.get("/genres", tags=["Model"])
+@app.get(
+    "/genres",
+    tags=["Model Information"],
+    summary="Get Supported Genres",
+    description="Returns the list of music genres that the model can classify"
+)
 async def get_genres():
-    """Get list of supported genres."""
+    """
+    # Get Supported Genres
+
+    Returns all music genres that the model can classify.
+
+    ## Response:
+    - **genres**: Array of genre names
+    - **count**: Total number of genres
+
+    ## Example Response:
+    ```json
+    {
+        "genres": [
+            "Rock",
+            "Electronic",
+            "Hip-Hop",
+            "Classical",
+            "Jazz",
+            "Folk",
+            "Pop",
+            "Experimental"
+        ],
+        "count": 8
+    }
+    ```
+    """
     if model_wrapper is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
-    
+
     return {
         "genres": model_wrapper.genre_names,
         "count": len(model_wrapper.genre_names)
     }
 
 
-@app.get("/model/info", tags=["Model"])
+@app.get(
+    "/model/info",
+    tags=["Model Information"],
+    summary="Get Model Information",
+    description="Returns detailed information about the loaded model"
+)
 async def get_model_info():
-    """Get information about loaded model."""
+    """
+    # Get Model Information
+
+    Returns metadata and configuration details about the loaded classification model.
+
+    ## Response Fields:
+    - **status**: Model loading status
+    - **device**: Compute device (CPU or CUDA)
+    - **num_classes**: Number of genre classes
+    - **genre_names**: List of supported genres
+    - **input_features**: Number of input features expected (20)
+
+    ## Example Response:
+    ```json
+    {
+        "status": "loaded",
+        "device": "cpu",
+        "num_classes": 8,
+        "genre_names": ["Rock", "Electronic", "Hip-Hop", "Classical", "Jazz", "Folk", "Pop", "Experimental"],
+        "input_features": 20
+    }
+    ```
+    """
     if model_wrapper is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
-    
+
     return {
         'status': 'loaded',
         'device': model_wrapper.device,
