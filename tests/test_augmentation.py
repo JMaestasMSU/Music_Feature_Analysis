@@ -83,22 +83,37 @@ def test_time_frequency_masking():
     print("="*70)
 
     aug = SpectrogramAugmentation()
-    spec = np.ones((128, 128))
+    spec = np.ones((128, 256))  # Use 256 time steps for more reliable masking
 
-    time_masked = aug.time_mask(spec, max_mask_time=20)
-    freq_masked = aug.frequency_mask(spec, max_mask_freq=20)
+    # Apply multiple times to ensure we get non-zero masks
+    time_masked = spec.copy()
+    freq_masked = spec.copy()
 
-    # Count zeros in each dimension
-    time_zeros_per_row = (time_masked == 0).sum(axis=1)
-    freq_zeros_per_col = (freq_masked == 0).sum(axis=0)
+    # Apply masks until we get actual masking (avoid zero-length masks)
+    for _ in range(10):
+        time_masked = aug.time_mask(time_masked, max_mask_time=30)
+        freq_masked = aug.frequency_mask(freq_masked, max_mask_freq=30)
 
-    time_has_full_columns = np.any(time_zeros_per_row == 128)  # Entire time step masked
-    freq_has_full_rows = np.any(freq_zeros_per_col == 128)     # Entire frequency masked
+    # Check that masking happened
+    time_has_zeros = np.any(time_masked == 0)
+    freq_has_zeros = np.any(freq_masked == 0)
 
-    print(f"  Time mask creates full columns: {time_has_full_columns}")
-    print(f"  Freq mask creates full rows:    {freq_has_full_rows}")
+    # Check the pattern of masking
+    # Time masking should create vertical stripes (all frequencies affected at certain times)
+    # Frequency masking should create horizontal stripes (all times affected at certain frequencies)
 
-    if time_has_full_columns and freq_has_full_rows:
+    # For time mask: check if any column is fully masked
+    time_fully_masked_cols = np.any((time_masked == 0).all(axis=0))
+
+    # For freq mask: check if any row is fully masked
+    freq_fully_masked_rows = np.any((freq_masked == 0).all(axis=1))
+
+    print(f"  Time mask has zeros: {time_has_zeros}")
+    print(f"  Freq mask has zeros: {freq_has_zeros}")
+    print(f"  Time mask creates full columns: {time_fully_masked_cols}")
+    print(f"  Freq mask creates full rows:    {freq_fully_masked_rows}")
+
+    if time_has_zeros and freq_has_zeros and time_fully_masked_cols and freq_fully_masked_rows:
         print("  PASSED: Masking dimensions correct")
         return True
     else:

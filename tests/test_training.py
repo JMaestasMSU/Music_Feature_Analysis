@@ -11,6 +11,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 import torch
 import numpy as np
+import tempfile
 from models.cnn_model import MultiLabelAudioCNN, MultiLabelTrainer
 from models.audio_augmentation import create_dataloaders
 
@@ -149,27 +150,37 @@ def test_full_training_loop():
     )
 
     try:
-        history = trainer.train(
-            train_loader, val_loader,
-            epochs=3, patience=10,
-            save_path='/tmp/test_model.pt'
-        )
+        # Use cross-platform temporary file
+        with tempfile.NamedTemporaryFile(suffix='.pt', delete=False) as tmp:
+            tmp_path = tmp.name
 
-        print(f"  Training completed")
-        print(f"  Epochs trained: {len(history['train_loss'])}")
-        print(f"  Final train loss: {history['train_loss'][-1]:.4f}")
-        print(f"  Final val loss:   {history['val_loss'][-1]:.4f}")
+        try:
+            history = trainer.train(
+                train_loader, val_loader,
+                epochs=3, patience=10,
+                save_path=tmp_path
+            )
 
-        # Check history has required keys
-        required_keys = ['train_loss', 'val_loss', 'val_f1', 'val_precision', 'val_recall']
-        has_all_keys = all(key in history for key in required_keys)
+            print(f"  Training completed")
+            print(f"  Epochs trained: {len(history['train_loss'])}")
+            print(f"  Final train loss: {history['train_loss'][-1]:.4f}")
+            print(f"  Final val loss:   {history['val_loss'][-1]:.4f}")
 
-        if has_all_keys and len(history['train_loss']) > 0:
-            print("  PASSED: Training loop completed")
-            return True
-        else:
-            print("  FAILED: History incomplete")
-            return False
+            # Check history has required keys
+            required_keys = ['train_loss', 'val_loss', 'val_f1', 'val_precision', 'val_recall']
+            has_all_keys = all(key in history for key in required_keys)
+
+            if has_all_keys and len(history['train_loss']) > 0:
+                print("  PASSED: Training loop completed")
+                return True
+            else:
+                print("  FAILED: History incomplete")
+                return False
+        finally:
+            # Clean up temporary file
+            import os
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
 
     except Exception as e:
         print(f"  FAILED: {e}")
