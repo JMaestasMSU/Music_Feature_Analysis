@@ -144,25 +144,25 @@ def extract_raw_audio():
     
     # Check if already exists
     if check_raw_data_exists():
-        print("⏩ Skipping download - audio files already present")
+        print(" Skipping download - audio files already present")
         return True
     
     # Download
     zip_path = RAW_DIR / 'fma_small.zip'
     if not zip_path.exists():
-        print(f"\n📥 Downloading fma_small.zip (~8 GB)...")
+        print(f"\n Downloading fma_small.zip (~8 GB)...")
         if not download_file(FMA_SMALL_URL, zip_path):
             return False
     else:
         print(f" Using existing download: {zip_path}")
     
     # Extract directly to raw/ (skip fma_small/ directory)
-    print(f"\n📦 Extracting to {RAW_DIR}...")
+    print(f"\n Extracting to {RAW_DIR}...")
     success = extract_zip_flat(zip_path, RAW_DIR, skip_root=True)
     
     if success:
         # Clean up zip file
-        print(f"\n🧹 Cleaning up {zip_path.name}...")
+        print(f"\n Cleaning up {zip_path.name}...")
         zip_path.unlink()
         print(f" Removed {zip_path.name}")
         
@@ -181,25 +181,25 @@ def extract_metadata():
     
     # Check if already exists
     if check_metadata_exists():
-        print("⏩ Skipping download - metadata already present")
+        print(" Skipping download - metadata already present")
         return True
     
     # Download
     zip_path = METADATA_DIR / 'fma_metadata.zip'
     if not zip_path.exists():
-        print(f"\n📥 Downloading fma_metadata.zip (~5 MB)...")
+        print(f"\n Downloading fma_metadata.zip (~5 MB)...")
         if not download_file(FMA_METADATA_URL, zip_path):
             return False
     else:
         print(f" Using existing download: {zip_path}")
     
     # Extract directly to metadata/ (skip fma_metadata/ directory)
-    print(f"\n📦 Extracting to {METADATA_DIR}...")
+    print(f"\n Extracting to {METADATA_DIR}...")
     success = extract_zip_flat(zip_path, METADATA_DIR, skip_root=True)
     
     if success:
         # Clean up zip file
-        print(f"\n🧹 Cleaning up {zip_path.name}...")
+        print(f"\n Cleaning up {zip_path.name}...")
         zip_path.unlink()
         print(f" Removed {zip_path.name}")
         

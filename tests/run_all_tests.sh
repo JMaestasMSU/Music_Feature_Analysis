@@ -67,12 +67,12 @@ echo "Failed: $TESTS_FAILED / 4"
 
 if [ $TESTS_FAILED -eq 0 ]; then
     echo ""
-    echo "[OK] All tests passed! ✓"
+    echo "[OK] All tests passed! "
     echo "========================================================================"
     exit 0
 else
     echo ""
-    echo "[FAIL] Some tests failed ✗"
+    echo "[FAIL] Some tests failed "
     echo "========================================================================"
     exit 1
 fi
