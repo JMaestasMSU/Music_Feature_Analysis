@@ -1,19 +1,25 @@
-FROM python:3.11-slim
+FROM continuumio/miniconda3:latest
 
 LABEL maintainer="Jarred Maestas"
 LABEL description="Music Genre Classification Model Inference Server"
 
 WORKDIR /app
 
-# Install dependencies
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements
-COPY app/requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy conda environment file
+COPY environments/environment.yml /app/environment.yml
+
+# Create conda environment
+RUN conda env create -f environment.yml && \
+    conda clean -afy
+
+# Make RUN commands use the new environment
+SHELL ["conda", "run", "-n", "music-feature-analysis", "/bin/bash", "-c"]
 
 # Copy application
 COPY app/ /app/app/
@@ -24,6 +30,7 @@ EXPOSE 8001
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD python -c "import requests; requests.get('http://localhost:8001/health')"
+  CMD conda run -n music-feature-analysis python -c "import requests; requests.get('http://localhost:8001/health')"
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]
+# Run application with conda
+CMD ["conda", "run", "--no-capture-output", "-n", "music-feature-analysis", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]
