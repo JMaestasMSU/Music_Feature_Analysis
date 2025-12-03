@@ -88,6 +88,68 @@ class AudioAnalysisResponse(BaseModel):
 
 
 # ============================================================================
+# Global State
+# ============================================================================
+
+model_wrapper: Optional[ModelWrapper] = None
+
+
+# ============================================================================
+# Lifespan Events
+# ============================================================================
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan event handler for startup and shutdown."""
+    global model_wrapper
+
+    # Startup
+    print(f"Starting {config.APP_NAME} v{config.VERSION}")
+
+    # SIMPLIFIED: Always use same feature file
+    features_pkl = Path("../data/processed/ml_ready_features.pkl")
+
+    if not features_pkl.exists():
+        print(f"  WARNING: {features_pkl} not found")
+        print(f"   Run: python scripts/create_features.py")
+        print(f"   Using untrained model...")
+
+        # Load untrained model
+        model = GenreClassifier(input_dim=20, num_classes=8)
+        genre_names = ['Rock', 'Electronic', 'Hip-Hop', 'Classical', 'Jazz', 'Folk', 'Pop', 'Experimental']
+
+        model_wrapper = ModelWrapper(model=model, scaler=None, genre_names=genre_names, device='cpu')
+    else:
+        # Load real data
+        with open(features_pkl, 'rb') as f:
+            df = pickle.load(f)
+
+        genre_names = sorted(df['genre'].unique())
+
+        # Try loading trained model
+        try:
+            model, scaler, _, _ = load_production_model(
+                model_class=GenreClassifier,
+                model_dir='../models/trained_models',
+                model_name='genre_classifier_production',
+                device='cpu'
+            )
+            print(f" Loaded trained model")
+        except:
+            print(f"  Trained model not found, using untrained")
+            model = GenreClassifier(input_dim=len(df.columns)-1, num_classes=len(genre_names))
+            scaler = None
+
+        model_wrapper = ModelWrapper(model=model, scaler=scaler, genre_names=genre_names, device='cpu')
+        print(f" Model ready: {len(genre_names)} genres")
+
+    yield
+
+    # Shutdown
+    print(f"Shutting down {config.APP_NAME}")
+
+
+# ============================================================================
 # FastAPI Application
 # ============================================================================
 
@@ -96,7 +158,8 @@ app = FastAPI(
     version=config.VERSION,
     description="REST API for music genre classification using neural networks",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    lifespan=lifespan
 )
 
 # CORS middleware
@@ -107,69 +170,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-# ============================================================================
-# Global State
-# ============================================================================
-
-model_wrapper: Optional[ModelWrapper] = None
-
-
-# ============================================================================
-# Startup/Shutdown Events
-# ============================================================================
-
-@app.on_event("startup")
-async def startup_event():
-    """Load model on startup."""
-    global model_wrapper
-    
-    print(f"Starting {config.APP_NAME} v{config.VERSION}")
-    
-    # SIMPLIFIED: Always use same feature file
-    features_pkl = Path("../data/processed/ml_ready_features.pkl")
-    
-    if not features_pkl.exists():
-        print(f"  WARNING: {features_pkl} not found")
-        print(f"   Run: python scripts/create_features.py")
-        print(f"   Using untrained model...")
-        
-        # Load untrained model
-        model = GenreClassifier(input_dim=20, num_classes=8)
-        genre_names = ['Rock', 'Electronic', 'Hip-Hop', 'Classical', 'Jazz', 'Folk', 'Pop', 'Experimental']
-        
-        model_wrapper = ModelWrapper(model=model, scaler=None, genre_names=genre_names, device='cpu')
-        return
-    
-    # Load real data
-    with open(features_pkl, 'rb') as f:
-        df = pickle.load(f)
-    
-    genre_names = sorted(df['genre'].unique())
-    
-    # Try loading trained model
-    try:
-        model, scaler, _, _ = load_production_model(
-            model_class=GenreClassifier,
-            model_dir='../models/trained_models',
-            model_name='genre_classifier_production',
-            device='cpu'
-        )
-        print(f" Loaded trained model")
-    except:
-        print(f"  Trained model not found, using untrained")
-        model = GenreClassifier(input_dim=len(df.columns)-1, num_classes=len(genre_names))
-        scaler = None
-    
-    model_wrapper = ModelWrapper(model=model, scaler=scaler, genre_names=genre_names, device='cpu')
-    print(f" Model ready: {len(genre_names)} genres")
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup on shutdown."""
-    print(f"Shutting down {config.APP_NAME}")
 
 
 # ============================================================================
