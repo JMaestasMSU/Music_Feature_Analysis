@@ -1,6 +1,6 @@
 # Quick Start - Local Deployment
 
-This guide will get you up and running with the Music Feature Analysis system on your local machine using Docker.
+This guide covers deployment of the Music Feature Analysis system on a local machine using Docker.
 
 ## Prerequisites
 
@@ -21,19 +21,27 @@ cd Music_Feature_Analysis
 ### 2. Download and Setup Dataset
 
 ```bash
-# Install required Python packages for setup script
+# Install required Python packages for setup script (if needed)
 pip install requests tqdm
 
-# Download FMA Medium dataset (~25GB) and setup directories
-python scripts/download_fma_medium.py
+# Download dataset - choose your size:
+python scripts/download_fma.py                  # Small (default) - 8GB, 8K tracks
+python scripts/download_fma.py --size medium    # Medium - 25GB, 25K tracks
+python scripts/download_fma.py --size large     # Large - 93GB, 106K tracks
 
 # If you already have the dataset downloaded:
-python scripts/download_fma_medium.py --skip-download
+python scripts/download_fma.py --skip-download
 ```
+
+**Dataset options:**
+- **small** - 8GB, 8,000 tracks, 8 balanced genres (recommended for testing)
+- **medium** - 25GB, 25,000 tracks, 16 unbalanced genres
+- **large** - 93GB, 106,574 tracks, 161 genres (recommended for production)
+- **full** - 879GB, full audio (rarely needed)
 
 **What this does:**
 - Creates directory structure: `data/raw/`, `data/processed/`, `data/metadata/`
-- Downloads FMA Medium dataset (25,000 tracks, ~25GB)
+- Downloads selected FMA dataset
 - Downloads FMA metadata files (~342MB)
 - Extracts and organizes files into numbered directories (000/, 001/, etc.)
 - Validates dataset structure
@@ -58,24 +66,25 @@ data/
 ```
 
 
-### 3. Extract Audio Features
+### 3. Prepare Spectrograms for CNN Training
 
 ```bash
-# Using Docker (recommended - uses conda environment)
-docker-compose --profile preprocessing up feature-extraction
+# Locally with conda environment (recommended)
+conda activate music-feature-analysis  # or mfa-cpu or mfa-gpu-cuda11-8
+python scripts/prepare_cnn_spectrograms.py
 
-# OR locally if you have conda environment setup:
-conda activate music-feature-analysis
-python scripts/extract_audio_features.py
+# Or using Docker
+docker-compose --profile preprocessing up feature-extraction
 ```
 
 **What this does:**
 - Processes all audio files in `data/raw/`
-- Extracts mel-spectrograms and audio features
-- Saves features to `data/processed/extracted_features.pkl`
-- Creates spectrogram images in `data/processed/spectrograms/`
+- Extracts full mel-spectrograms for CNN training
+- Saves spectrograms to `data/processed/spectrograms.npy`
+- Saves labels to `data/processed/labels.npy`
+- Saves genre names to `data/processed/genre_names.json`
 
-**Time:** ~2-4 hours for 25,000 tracks (depends on CPU)
+**Time:** ~2-4 hours for 25,000 tracks, ~30-60 minutes for 8,000 tracks (depends on CPU)
 
 ### 4. Train the Model
 
@@ -289,6 +298,6 @@ docker-compose logs training | tail -n 50
 
 ---
 
-**Time to Complete Setup:** 3-5 hours (mostly download and feature extraction time)
-**Disk Space Required:** ~50GB
-**Recommended:** 16GB RAM, NVIDIA GPU for training
+**Setup Time:** 3-5 hours (mostly download and feature extraction time)
+**Disk Space:** ~50GB
+**Hardware:** 16GB RAM recommended, NVIDIA GPU for training

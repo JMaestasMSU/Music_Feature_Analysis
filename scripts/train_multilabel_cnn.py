@@ -41,6 +41,10 @@ def parse_args():
                        help='Numpy file with labels')
     parser.add_argument('--genre-names-file', type=str, default='genre_names.json',
                        help='JSON file with genre names')
+    parser.add_argument('--min-samples-per-genre', type=int, default=0,
+                       help='Filter out genres with fewer than N samples (0 = no filter)')
+    parser.add_argument('--max-genres', type=int, default=None,
+                       help='Keep only top N most common genres (None = keep all)')
 
     # Model arguments
     parser.add_argument('--num-genres', type=int, default=50,
@@ -84,6 +88,24 @@ def parse_args():
     parser.add_argument('--experiment-name', type=str, default=None,
                        help='Experiment name (auto-generated if not provided)')
 
+    # Threshold tuning arguments
+    parser.add_argument('--load-tuning-results', type=str, default=None,
+                       help='Path to threshold_tuning_results.json to load optimal settings')
+    parser.add_argument('--prediction-threshold', type=float, default=0.5,
+                       help='Prediction threshold for binary classification')
+    parser.add_argument('--top-k', type=int, default=None,
+                       help='Keep only top-K predictions per sample (None = no limit)')
+    
+    # Class weighting arguments
+    parser.add_argument('--pos-weight-cap', type=float, default=None,
+                       help='Cap maximum pos_weight value to prevent extreme weights')
+    parser.add_argument('--pos-weight-power', type=float, default=1.0,
+                       help='Apply power to pos_weight (e.g., 0.5 for sqrt scaling)')
+    
+    # Debugging arguments
+    parser.add_argument('--debug', action='store_true',
+                       help='Enable debug mode with extra logging')
+
     # Config file (overrides all other arguments)
     parser.add_argument('--config', type=str, default=None,
                        help='YAML config file (overrides CLI args)')
@@ -119,6 +141,65 @@ def get_device(device_str: str) -> torch.device:
     return device
 
 
+def load_tuning_results(tuning_file):
+    """Load threshold tuning results and return optimal settings."""
+    tuning_path = Path(tuning_file)
+    if not tuning_path.exists():
+        raise FileNotFoundError(f"Tuning results not found: {tuning_path}")
+    
+    with open(tuning_path, 'r') as f:
+        results = json.load(f)
+    
+    best_strategy = results.get('best_strategy', {})
+    metrics = best_strategy.get('metrics', {})
+    
+    # Extract threshold and top-k if available
+    threshold = metrics.get('threshold', 0.5)
+    top_k = metrics.get('k', None)
+    
+    print(f"\nLoaded optimal tuning settings from {tuning_path.name}:")
+    print(f"  Strategy: {best_strategy.get('name', 'Unknown')}")
+    print(f"  Threshold: {threshold:.3f}")
+    if top_k:
+        print(f"  Top-K: {top_k}")
+    print(f"  Expected F1: {metrics.get('f1_macro', 0):.4f}")
+    print(f"  Expected Precision: {metrics.get('precision_macro', 0):.4f}")
+    print(f"  Expected Recall: {metrics.get('recall_macro', 0):.4f}")
+    
+    return threshold, top_k
+
+
+def apply_topk(probabilities, predictions, k):
+    """
+    Apply top-K filtering: keep only the K highest probability predictions per sample.
+    
+    Args:
+        probabilities: Probability scores (n_samples, n_classes)
+        predictions: Binary predictions (n_samples, n_classes)
+        k: Number of top predictions to keep
+    
+    Returns:
+        filtered_predictions: Binary predictions with top-K filtering applied
+    """
+    filtered_predictions = np.zeros_like(predictions)
+    
+    for i in range(len(probabilities)):
+        # Get indices of predictions above threshold
+        pred_indices = np.where(predictions[i] == 1)[0]
+        
+        if len(pred_indices) <= k:
+            # Keep all if fewer than K predictions
+            filtered_predictions[i] = predictions[i]
+        else:
+            # Keep only top K by probability
+            pred_probs = probabilities[i, pred_indices]
+            top_k_local = np.argsort(pred_probs)[-k:]
+            top_k_global = pred_indices[top_k_local]
+            filtered_predictions[i, top_k_global] = 1
+    
+    return filtered_predictions
+
+
 def load_data(args):
     """Load spectrograms and labels from disk."""
     data_dir = Path(args.data_dir)
@@ -148,7 +229,18 @@ def load_data(args):
         print(f"  Loaded {len(genre_names)} genre names")
     else:
         print(f"  Warning: Genre names file not found: {genre_names_path}")
-        genre_names = [f"Genre_{i}" for i in range(args.num_genres)]
+        genre_names = [f"Genre_{i}" for i in range(labels.shape[1])]
+
+    # Filter genres by sample count
+    if args.min_samples_per_genre > 0 or args.max_genres is not None:
+        spectrograms, labels, genre_names = filter_genres(
+            spectrograms, labels, genre_names,
+            min_samples=args.min_samples_per_genre,
+            max_genres=args.max_genres,
+            debug=args.debug
+        )
+        # Update num_genres after filtering
+        args.num_genres = len(genre_names)
 
     # Validate data
     assert len(spectrograms) == len(labels), "Mismatch between spectrograms and labels"
@@ -160,6 +252,66 @@ def load_data(args):
         assert labels.ndim == 1, "Single-label requires 1D labels"
 
     return spectrograms, labels, genre_names
+
+
+def filter_genres(spectrograms, labels, genre_names, min_samples=0, max_genres=None, debug=False):
+    """
+    Filter dataset to include only genres with sufficient samples.
+    
+    Args:
+        spectrograms: Spectrogram array
+        labels: Multi-label array (samples, genres)
+        genre_names: List of genre names
+        min_samples: Minimum samples per genre
+        max_genres: Maximum number of genres to keep (keeps most common)
+        debug: Print detailed filtering info
+    
+    Returns:
+        Filtered spectrograms, labels, and genre_names
+    """
+    print(f"\nFiltering genres:")
+    print(f"  Original: {len(genre_names)} genres, {len(spectrograms)} samples")
+    
+    # Count samples per genre
+    genre_counts = labels.sum(axis=0).astype(int)
+    
+    # Determine which genres to keep
+    keep_genres = np.ones(len(genre_names), dtype=bool)
+    
+    if min_samples > 0:
+        keep_genres &= (genre_counts >= min_samples)
+        print(f"  After min_samples={min_samples}: {keep_genres.sum()} genres remain")
+    
+    if max_genres is not None:
+        # Sort by count, keep top N
+        top_genre_indices = np.argsort(genre_counts)[::-1][:max_genres]
+        keep_mask = np.zeros(len(genre_names), dtype=bool)
+        keep_mask[top_genre_indices] = True
+        keep_genres &= keep_mask
+        print(f"  After max_genres={max_genres}: {keep_genres.sum()} genres remain")
+    
+    # Filter genres
+    genre_indices = np.where(keep_genres)[0]
+    filtered_labels = labels[:, genre_indices]
+    filtered_genre_names = [genre_names[i] for i in genre_indices]
+    
+    # Remove samples with no remaining labels
+    sample_has_label = filtered_labels.sum(axis=1) > 0
+    filtered_spectrograms = spectrograms[sample_has_label]
+    filtered_labels = filtered_labels[sample_has_label]
+    
+    print(f"  Final: {len(filtered_genre_names)} genres, {len(filtered_spectrograms)} samples")
+    
+    if debug:
+        print(f"\\n  Kept genres and their counts:")
+        for i, idx in enumerate(genre_indices):
+            print(f"    {filtered_genre_names[i]:30s}: {genre_counts[idx]:4d} samples")
+    
+    # Show genre distribution summary
+    new_counts = filtered_labels.sum(axis=0)
+    print(f"  Imbalance ratio: {new_counts.max()}/{new_counts.min()} = {new_counts.max()/new_counts.min():.1f}x")
+    
+    return filtered_spectrograms, filtered_labels, filtered_genre_names
 
 
 def create_splits(spectrograms, labels, args):
@@ -198,9 +350,16 @@ def create_splits(spectrograms, labels, args):
     return train_idx, val_idx, test_idx
 
 
-def calculate_pos_weight(labels, train_idx):
+def calculate_pos_weight(labels, train_idx, power=1.0, cap=None, debug=False):
     """
     Calculate positive class weights for imbalanced multi-label datasets.
+
+    Args:
+        labels: All labels array
+        train_idx: Training indices
+        power: Apply power transformation (0.5 = sqrt, reduces extreme weights)
+        cap: Maximum weight value (None = no cap)
+        debug: Print detailed statistics
 
     Returns tensor of weights for BCEWithLogitsLoss.
     """
@@ -215,11 +374,28 @@ def calculate_pos_weight(labels, train_idx):
 
     # Weight = neg_count / pos_count
     pos_weight = neg_counts / pos_counts
+    
+    # Apply power transformation to reduce extreme weights
+    if power != 1.0:
+        pos_weight = np.power(pos_weight, power)
+        print(f"  Applied power transformation: {power}")
+    
+    # Cap maximum weight
+    if cap is not None:
+        pos_weight = np.minimum(pos_weight, cap)
+        print(f"  Capped weights at: {cap}")
 
     print("\nClass imbalance statistics:")
     print(f"  Most imbalanced: {pos_weight.max():.2f}x")
     print(f"  Least imbalanced: {pos_weight.min():.2f}x")
     print(f"  Mean: {pos_weight.mean():.2f}x")
+    print(f"  Median: {np.median(pos_weight):.2f}x")
+    
+    if debug:
+        print("\n  Top 10 most weighted classes:")
+        top_indices = np.argsort(pos_weight)[-10:][::-1]
+        for idx in top_indices:
+            print(f"    Class {idx}: weight={pos_weight[idx]:.2f}x, pos_count={int(pos_counts[idx])}")
 
     return torch.FloatTensor(pos_weight)
 
@@ -250,6 +426,18 @@ def main():
     print(f"Experiment: {args.experiment_name}")
     print(f"Output dir: {experiment_dir}")
 
+    # Load tuning results if provided
+    if args.load_tuning_results:
+        threshold, top_k = load_tuning_results(args.load_tuning_results)
+        args.prediction_threshold = threshold
+        if top_k is not None:
+            args.top_k = top_k
+    else:
+        print(f"\nUsing default prediction settings:")
+        print(f"  Threshold: {args.prediction_threshold}")
+        if args.top_k:
+            print(f"  Top-K: {args.top_k}")
+
     # Save configuration
     config_path = experiment_dir / "config.yaml"
     with open(config_path, 'w') as f:
@@ -261,6 +449,12 @@ def main():
 
     # Load data
     spectrograms, labels, genre_names = load_data(args)
+    
+    # Save genre names for later inference
+    genre_names_path = experiment_dir / "genre_names.json"
+    with open(genre_names_path, 'w') as f:
+        json.dump(genre_names, f, indent=2)
+    print(f"Genre names saved to: {genre_names_path}")
 
     # Create splits
     train_idx, val_idx, test_idx = create_splits(spectrograms, labels, args)
@@ -268,7 +462,12 @@ def main():
     # Calculate class weights for imbalanced data
     pos_weight = None
     if args.multi_label:
-        pos_weight = calculate_pos_weight(labels, train_idx)
+        pos_weight = calculate_pos_weight(
+            labels, train_idx,
+            power=args.pos_weight_power,
+            cap=args.pos_weight_cap,
+            debug=args.debug
+        )
 
     # Create dataloaders
     print("\nCreating dataloaders...")
@@ -346,7 +545,12 @@ def main():
     print("EVALUATING ON TEST SET")
     print("="*80)
 
-    predictions, probabilities = trainer.predict(test_loader)
+    predictions, probabilities = trainer.predict(test_loader, threshold=args.prediction_threshold)
+
+    # Apply top-K if specified
+    if args.top_k is not None:
+        print(f"Applying top-{args.top_k} filtering...")
+        predictions = apply_topk(probabilities, predictions, args.top_k)
 
     # Calculate test metrics
     test_labels = labels[test_idx]

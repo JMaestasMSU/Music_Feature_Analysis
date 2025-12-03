@@ -125,21 +125,39 @@ cd scripts/
 
 ## Dataset Download Scripts
 
-### `download_fma_medium.py` (25GB)
-**Purpose:** Download and setup FMA Medium dataset (25,000 tracks)
+### `download_fma.py` - Unified FMA Dataset Downloader
+**Purpose:** Download and setup any FMA dataset size with a single script
 
 **Usage:**
 ```bash
-# Download and extract dataset
-python scripts/download_fma_medium.py
+# Download small dataset (default) - 8GB, 8K tracks
+python scripts/download_fma.py
+
+# Download specific size
+python scripts/download_fma.py --size small     # 8GB, 8K tracks, 8 genres
+python scripts/download_fma.py --size medium    # 25GB, 25K tracks, 16 genres
+python scripts/download_fma.py --size large     # 93GB, 106K tracks, 161 genres
+python scripts/download_fma.py --size full      # 879GB, full audio
 
 # Skip download if files already exist
-python scripts/download_fma_medium.py --skip-download
+python scripts/download_fma.py --skip-download
+
+# See all options
+python scripts/download_fma.py --help
 ```
+
+**Dataset Sizes:**
+
+| Size | Tracks | Genres | Size | Best For |
+|------|--------|--------|------|----------|
+| **small** | 8,000 | 8 balanced | ~8GB | Testing, learning, quick iteration |
+| **medium** | 25,000 | 16 unbalanced | ~25GB | Standard training, experiments |
+| **large** | 106,574 | 161 | ~93GB | Production, research, best accuracy |
+| **full** | 106,574 | 161 | ~879GB | Full audio quality (30s clips in others) |
 
 **What it does:**
 1. Creates directory structure: `data/raw/`, `data/processed/`, `data/metadata/`
-2. Downloads FMA Medium dataset (~25GB) from official source
+2. Downloads selected FMA dataset from official source
 3. Downloads FMA metadata (~342MB)
 4. Extracts files to `data/raw/000/`, `data/raw/001/`, etc.
 5. Validates dataset structure
@@ -154,7 +172,7 @@ data/
 │   │   └── ...
 │   ├── 001/
 │   │   └── ...
-│   └── ... (156 directories)
+│   └── ... (numbered directories)
 └── metadata/
     ├── tracks.csv
     ├── genres.csv
@@ -162,51 +180,44 @@ data/
     └── ...
 ```
 
-**When to use:**
-- Production training with full dataset
-- Local deployment setup
-- Research with larger dataset
-
-**Time:** 1-2 hours (download) + 30 minutes (extraction)
-
----
-
-### `download_fma_small.py` (8GB)
-**Purpose:** Download and setup FMA Small dataset (8,000 tracks) - faster for testing
-
-**Usage:**
-```bash
-python scripts/download_fma_small.py
-```
-
-**What it does:**
-1. Creates directory structure (same as medium)
-2. Downloads FMA Small dataset (~8GB)
-3. Downloads FMA metadata (~342MB)
-4. Extracts files to `data/raw/`
-5. Validates dataset structure
-
-**Output:** Same structure as FMA Medium, but with fewer tracks
-
-**When to use:**
-- Quick testing and development
-- Learning the system
-- Limited disk space
-- Faster iteration cycles
-
-**Time:** 20-30 minutes (download) + 10 minutes (extraction)
+**Download Times (approximate):**
+- **small:** 30-60 minutes
+- **medium:** 1-2 hours
+- **large:** 3-6 hours
+- **full:** 12-24+ hours
 
 ---
 
 ## Feature Extraction Scripts
 
 ### `extract_audio_features.py`
-**Purpose:** Extract mel-spectrograms and audio features from raw audio files
+**Purpose:** Extract mel-spectrograms and audio features from raw audio files for EDA
 
 **Usage:**
 ```bash
-# Extract features from all audio in data/raw/
+# Extract features (uses all CPU cores by default, top-level genres)
 python scripts/extract_audio_features.py
+
+# Use detailed subgenres instead of top-level genres (50+ genres)
+python scripts/extract_audio_features.py --use-subgenres
+
+# Specify number of workers for parallel processing
+python scripts/extract_audio_features.py --num-workers 4
+
+# Process more samples per genre
+python scripts/extract_audio_features.py --samples-per-genre 200
+
+# Limit total samples for quick testing
+python scripts/extract_audio_features.py --max-samples 500
+
+# Filter out rare genres (minimum samples per genre)
+python scripts/extract_audio_features.py --use-subgenres --min-samples-per-genre 20
+
+# Generate more spectrogram images (random mix)
+python scripts/extract_audio_features.py --num-spectrogram-examples 200
+
+# Generate spectrograms per genre (even distribution)
+python scripts/extract_audio_features.py --use-subgenres --spectrograms-per-genre 10
 
 # Or using Docker
 docker-compose --profile preprocessing up feature-extraction
@@ -233,12 +244,26 @@ data/processed/
     └── ...
 ```
 
-**When to use:**
-- After downloading FMA dataset
-- Before training models
-- When you need fresh feature extraction
+**Genre Options:**
+- **Default (no flag):** Uses 16 top-level genres (Rock, Electronic, Hip-Hop, etc.)
+- **--use-subgenres:** Uses detailed subgenres (70+ genres like Tech-House, Thrash, etc.)
+- **--min-samples-per-genre:** Filter out rare genres with too few samples
 
-**Time:** 2-4 hours for FMA Medium (CPU), 30 minutes for FMA Small
+**Spectrogram Image Options:**
+- **--num-spectrogram-examples N:** Generate N total spectrogram images (random mix, default: 50)
+- **--spectrograms-per-genre N:** Generate N images per genre (even distribution, overrides num-spectrogram-examples)
+
+**When to use:**
+- For exploratory data analysis (EDA) and visualization
+- After downloading FMA dataset
+- To generate example spectrograms
+- Use --use-subgenres to match your training data genres
+
+**Performance:**
+- Uses multiprocessing for fast extraction
+- Default: 100 samples per genre
+- Time: ~5-10 minutes for 1,500 samples with multiprocessing (vs 30+ minutes single-threaded)
+- With --use-subgenres and 70 genres: ~15-20 minutes for 7,000 samples
 
 ---
 
@@ -411,10 +436,13 @@ python scripts/create_sample_model.py --out models/sample_model.joblib
 ```bash
 # 1. Setup dataset
 pip install requests tqdm
-python scripts/download_fma_medium.py
+python scripts/download_fma.py              # Downloads small (default)
+# OR choose a specific size:
+python scripts/download_fma.py --size medium
+python scripts/download_fma.py --size large
 
-# 2. Extract features
-docker-compose --profile preprocessing up feature-extraction
+# 2. Prepare spectrograms for CNN
+python scripts/prepare_cnn_spectrograms.py
 
 # 3. Train model
 docker-compose --profile training up training
@@ -449,13 +477,13 @@ conda activate mfa-gpu-cuda11-8  # If you installed GPU
 # OR
 conda activate mfa-cpu           # If you installed CPU
 
-# 3. Download dataset (choose one)
-python scripts/download_fma_small.py      # Faster (8GB)
-# OR
-python scripts/download_fma_medium.py     # More data (25GB)
+# 3. Download dataset
+python scripts/download_fma.py                  # Downloads small (default)
+python scripts/download_fma.py --size medium    # Or medium
+python scripts/download_fma.py --size large     # Or large
 
-# 4. Extract features (works with CPU or GPU environment)
-python scripts/extract_audio_features.py
+# 4. Prepare spectrograms for CNN training
+python scripts/prepare_cnn_spectrograms.py
 
 # 5. Train model (use GPU environment for faster training!)
 python scripts/train_multilabel_cnn.py
@@ -490,15 +518,16 @@ python scripts/train_multilabel_cnn.py
 For a complete setup from scratch:
 
 ```
-1. install_requirements.sh/ps1    (one time - setup environment)
+1. install_requirements.sh/ps1         (one time - setup environment)
    ↓
-2. download_fma_medium.py         (one time - download dataset)
+2. download_fma.py                     (one time - download dataset)
+   [--size small|medium|large]
    ↓
-3. extract_audio_features.py      (one time - extract features)
+3. prepare_cnn_spectrograms.py         (one time - prepare spectrograms)
    ↓
-4. train_multilabel_cnn.py        (train model)
+4. train_multilabel_cnn.py             (train model)
    ↓
-5. Start backend API               (deploy)
+5. Start backend API                    (deploy)
 ```
 
 ---

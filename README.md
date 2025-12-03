@@ -1,6 +1,6 @@
 # Music Feature Analysis - Advanced Genre Classification
 
-**Breaking free from 8-genre limitations with production-ready multi-label CNNs**
+A music genre classification system using multi-label CNNs.
 
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.0-red)
@@ -8,9 +8,9 @@
 
 ---
 
-## What This Is
+## Overview
 
-A **production-ready music genre classification system** that scales from 8 → 50 → 100+ genres without code changes.
+A music genre classification system that scales from 8 to 100+ genres without code changes.
 
 **Key Features:**
 - Multi-label CNN (songs can have multiple genres)
@@ -139,9 +139,9 @@ curl -X POST http://localhost:8000/api/v1/analysis/predict \
 ```python
 from models.cnn_model import MultiLabelAudioCNN
 
-# Create model for ANY number of genres
+# Create model for any number of genres
 model = MultiLabelAudioCNN(
-    num_genres=50,        # Or 100, 200, whatever!
+    num_genres=50,        # Configurable
     base_channels=64,     # Network width
     use_attention=True    # Channel attention
 )
@@ -172,7 +172,7 @@ augmented = aug.spec_augment(spectrogram)
 mixed, lambda_val = aug.mixup(spec1, spec2)
 ```
 
-**Impact:** 5-10x effective dataset increase!
+**Impact:** 5-10x effective dataset increase.
 
 ### 3. Bayesian Optimization ([models/bayesian_optimizer.py](models/bayesian_optimizer.py))
 
@@ -324,7 +324,15 @@ lr: 0.0001
 
 **Free Music Archive (FMA):**
 ```bash
-# 10,000 songs, 8GB
+# Easy setup with our unified script
+python scripts/download_fma.py              # Small: 8K tracks, 8GB
+python scripts/download_fma.py --size medium    # Medium: 25K tracks, 25GB
+python scripts/download_fma.py --size large     # Large: 106K tracks, 93GB
+```
+
+**Manual download:**
+```bash
+# If you prefer manual download
 wget https://os.unil.cloud.switch.ch/fma/fma_small.zip
 unzip fma_small.zip
 ```
@@ -336,14 +344,14 @@ unzip fma_small.zip
 
 ---
 
-## Key Achievements
+## Key Features
 
-**Unlimited genres** - Scale from 8 → 200+ by editing config
-**Multi-label** - Songs can have multiple genres (realistic!)
-**Production-ready** - Docker, API, deployment included
-**State-of-the-art** - ResNet, Attention, SpecAugment, Mixup
-**Bayesian optimization** - Automated hyperparameter tuning
-**Backwards compatible** - Original notebooks still work
+- Unlimited genres - Scale from 8 to 200+ by editing config
+- Multi-label classification - Songs can have multiple genres
+- Docker, API, deployment included
+- ResNet, Attention, SpecAugment, Mixup
+- Bayesian optimization - Automated hyperparameter tuning
+- Backwards compatible - Original notebooks still work
 
 ---
 

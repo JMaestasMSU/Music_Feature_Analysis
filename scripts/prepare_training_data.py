@@ -208,9 +208,9 @@ def main():
     
     print("\nNext steps:")
     if args.multi_label:
-        print("  - Train model: python scripts/train_multilabel_cnn.py")
+        print("  - Train model: python scripts/train_multilabel_cnn.py --multi-label true")
     else:
-        print("  - Train model: python scripts/train_baseline_cnn.py")
+        print("  - Train model: python scripts/train_multilabel_cnn.py --multi-label false")
 
 
 if __name__ == '__main__':

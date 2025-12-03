@@ -31,7 +31,17 @@ RAW_AUDIO_DIR = PROJECT_ROOT / "data" / "raw"
 def get_audio_path(track_id):
     """Convert track ID to file path"""
     tid_str = f'{track_id:06d}'
-    return RAW_AUDIO_DIR / tid_str[:3] / f'{tid_str}.mp3'
+    # Try multiple possible locations
+    possible_paths = [
+        RAW_AUDIO_DIR / tid_str[:3] / f'{tid_str}.mp3',  # Original FMA small structure
+        RAW_AUDIO_DIR / 'fma_large' / tid_str[:3] / f'{tid_str}.mp3',  # FMA large structure
+        RAW_AUDIO_DIR / 'fma_medium' / tid_str[:3] / f'{tid_str}.mp3',  # FMA medium structure
+    ]
+    for path in possible_paths:
+        if path.exists():
+            return path
+    # Return first path as default (for error messages)
+    return possible_paths[0]
 
 
 def extract_mel_spectrogram(audio_path, target_length=None):
@@ -109,6 +119,12 @@ def main():
                         help='Create multi-label format (one-hot encoding)')
     parser.add_argument('--num-workers', type=int, default=None,
                         help='Number of parallel workers (default: CPU count)')
+    parser.add_argument('--use-subgenres', action='store_true',
+                        help='Use detailed subgenres instead of top-level genres (gives 50+ genres)')
+    parser.add_argument('--min-samples-per-genre', type=int, default=10,
+                        help='Minimum number of samples per genre to include')
+    parser.add_argument('--chunk-size', type=int, default=5000,
+                        help='Process and save in chunks to avoid memory issues (default: 5000)')
     
     args = parser.parse_args()
     
@@ -121,15 +137,53 @@ def main():
     tracks_df = pd.read_csv(TRACKS_CSV, index_col=0, header=[0, 1])
     
     # Get tracks with genre labels
-    genre_col = ('track', 'genre_top')
-    tracks_with_genre = tracks_df[tracks_df[genre_col].notna()].copy()
-    tracks_with_genre['genre'] = tracks_with_genre[genre_col]
+    if args.use_subgenres:
+        print("   Using subgenres (detailed genre classification)")
+        # Use the 'genres' column which contains lists of genre IDs
+        # First load the genres mapping
+        genres_csv = PROJECT_ROOT / "data" / "metadata" / "genres.csv"
+        genres_df = pd.read_csv(genres_csv, index_col=0)
+        
+        # Get tracks with genres
+        genre_col = ('track', 'genres')
+        tracks_with_genre = tracks_df[tracks_df[genre_col].notna()].copy()
+        
+        # Parse the genres (they're stored as stringified lists like "[21, 456]")
+        import ast
+        tracks_with_genre['genre_ids'] = tracks_with_genre[genre_col].apply(
+            lambda x: ast.literal_eval(x) if isinstance(x, str) and x.startswith('[') else []
+        )
+        
+        # Take the first genre for each track (or we could do multi-label for all)
+        tracks_with_genre['genre_id'] = tracks_with_genre['genre_ids'].apply(
+            lambda x: x[0] if x else None
+        )
+        tracks_with_genre = tracks_with_genre[tracks_with_genre['genre_id'].notna()]
+        
+        # Map genre IDs to genre titles
+        genre_id_to_title = genres_df['title'].to_dict()
+        tracks_with_genre['genre'] = tracks_with_genre['genre_id'].map(genre_id_to_title)
+        
+        # Remove any tracks where genre mapping failed
+        tracks_with_genre = tracks_with_genre[tracks_with_genre['genre'].notna()]
+    else:
+        print("   Using top-level genres (16 main categories)")
+        genre_col = ('track', 'genre_top')
+        tracks_with_genre = tracks_df[tracks_df[genre_col].notna()].copy()
+        tracks_with_genre['genre'] = tracks_with_genre[genre_col]
     
     if args.max_samples:
         tracks_with_genre = tracks_with_genre.head(args.max_samples)
     
     print(f"   Found {len(tracks_with_genre)} tracks with genre labels")
     print(f"   Genres: {tracks_with_genre['genre'].nunique()}")
+    
+    # Filter out genres with too few samples
+    if args.min_samples_per_genre > 0:
+        genre_counts = tracks_with_genre['genre'].value_counts()
+        valid_genres = genre_counts[genre_counts >= args.min_samples_per_genre].index
+        tracks_with_genre = tracks_with_genre[tracks_with_genre['genre'].isin(valid_genres)]
+        print(f"   After filtering (min {args.min_samples_per_genre} samples/genre): {len(tracks_with_genre)} tracks, {len(valid_genres)} genres")
     
     # Create genre mapping
     unique_genres = sorted(tracks_with_genre['genre'].unique())
@@ -172,40 +226,64 @@ def main():
             genre = str(genre_value).strip()
         track_data.append((track_id, genre, expected_frames))
     
-    # Process tracks in parallel
-    print(f"\n   Processing {len(track_data)} tracks...")
-    with Pool(num_workers) as pool:
-        results = list(tqdm(
-            pool.imap(process_single_track, track_data),
-            total=len(track_data),
-            desc="Processing tracks"
-        ))
+    total_tracks = len(track_data)
+    chunk_size = args.chunk_size
     
-    # Collect results
-    for result in results:
-        if result is None:
-            continue
+    print(f"\n   Processing {total_tracks} tracks in chunks of {chunk_size}...")
+    print(f"   This will save incrementally to avoid memory issues.")
+    
+    # Process in chunks
+    all_spectrograms = []
+    all_labels = []
+    chunk_num = 0
+    
+    for chunk_start in range(0, total_tracks, chunk_size):
+        chunk_end = min(chunk_start + chunk_size, total_tracks)
+        chunk_data = track_data[chunk_start:chunk_end]
+        chunk_num += 1
         
-        track_id, mel_spec, genre = result
-        spectrograms.append(mel_spec)
-        valid_track_ids.append(track_id)
+        print(f"\n   Chunk {chunk_num}/{(total_tracks + chunk_size - 1) // chunk_size}: Processing tracks {chunk_start} to {chunk_end}")
         
-        if args.multi_label:
-            # One-hot encoding
-            label = np.zeros(num_genres, dtype=np.float32)
-            label[genre_to_idx[genre]] = 1.0
-            labels.append(label)
-        else:
-            # Single label (class index)
-            labels.append(genre_to_idx[genre])
+        with Pool(num_workers) as pool:
+            results = list(tqdm(
+                pool.imap(process_single_track, chunk_data),
+                total=len(chunk_data),
+                desc=f"Chunk {chunk_num}"
+            ))
+        
+        # Collect valid results from this chunk
+        for result in results:
+            if result is None:
+                continue
+            
+            track_id, mel_spec, genre = result
+            all_spectrograms.append(mel_spec)
+            valid_track_ids.append(track_id)
+            
+            if args.multi_label:
+                # One-hot encoding
+                label = np.zeros(num_genres, dtype=np.float32)
+                label[genre_to_idx[genre]] = 1.0
+                all_labels.append(label)
+            else:
+                # Single label (class index)
+                all_labels.append(genre_to_idx[genre])
+    
+    num_valid = len(all_spectrograms)
+    if num_valid == 0:
+        print("\n ERROR: No valid spectrograms were processed!")
+        return
+    
+    print(f"\n4. Successfully processed {num_valid} tracks")
+    print(f"   Creating final arrays...")
     
     # Convert to numpy arrays
-    spectrograms = np.array(spectrograms, dtype=np.float32)
-    labels = np.array(labels)
+    spectrograms = np.array(all_spectrograms, dtype=np.float32)
+    labels = np.array(all_labels)
     
-    print(f"\n4. Extracted {len(spectrograms)} spectrograms")
     print(f"   Spectrograms shape: {spectrograms.shape}")
     print(f"   Labels shape: {labels.shape}")
+    print(f"   Memory usage: ~{spectrograms.nbytes / (1024**3):.2f} GB")
     
     # Save data
     output_dir = Path(args.output_dir)

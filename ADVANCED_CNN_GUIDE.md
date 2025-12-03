@@ -1,8 +1,6 @@
 # Advanced Multi-Label CNN Architecture Guide
 
-**Breaking Free from the 8-Genre Constraint**
-
-This guide covers the advanced CNN system that enables unlimited genre classification with state-of-the-art deep learning techniques.
+This guide covers the advanced CNN system that enables unlimited genre classification with deep learning techniques.
 
 ---
 
@@ -94,16 +92,16 @@ from models.cnn_model import MultiLabelAudioCNN
 
 # Create model for any number of genres
 model = MultiLabelAudioCNN(
-    num_genres=50,          # Or 100, 200, whatever you need
+    num_genres=50,          # Or 100, 200, etc.
     input_channels=1,       # Mono spectrograms
     base_channels=64,       # Width of network
     use_attention=True      # Enable channel attention
 )
 
-# Model automatically scales!
+# Model scales linearly with number of genres
 # 50 genres  → ~3.5M parameters
-# 100 genres → ~3.6M parameters (only +3%)
-# 200 genres → ~3.8M parameters (only +9%)
+# 100 genres → ~3.6M parameters (+3%)
+# 200 genres → ~3.8M parameters (+9%)
 ```
 
 ### Key Components
@@ -375,7 +373,7 @@ top_5_similar = np.argsort(similarities)[::-1][:5]
 | 100    | 3.6M      | 14 MB      | ~8 min              |
 | 200    | 3.8M      | 15 MB      | ~9 min              |
 
-**Key Insight**: Parameter growth is LINEAR with genre count, not exponential!
+**Note**: Parameter growth is linear with genre count, not exponential.
 
 ### Optimization Tips
 
@@ -616,4 +614,4 @@ use_amp: true
 - **Feature embeddings** for similarity search
 - **Scalable architecture** (8 → 200+ genres)
 
-**No more being stuck on 8 predetermined genres!**
+The system supports any number of genres.

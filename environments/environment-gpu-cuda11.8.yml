@@ -1,14 +1,15 @@
 name: mfa-gpu-cuda11-8
 channels:
   - pytorch
+  - nvidia
   - conda-forge
   - defaults
 dependencies:
   - python=3.10
-  - pytorch=2.2
-  - torchvision=0.15
-  - torchaudio=2.2
-  - cudatoolkit=11.8
+  - pytorch
+  - torchvision
+  - torchaudio
+  - pytorch-cuda=11.8
   - numpy=1.26
   - pandas=2.1
   - scikit-learn=1.2
@@ -17,6 +18,9 @@ dependencies:
   - seaborn=0.12
   - umap-learn=0.5
 
-# To create the GPU environment (PowerShell):
-# conda env create -f environment-gpu-cuda11.8.yml
+# To create the GPU environment:
+# conda env create -f environments/environment-gpu-cuda11.8.yml
 # conda activate mfa-gpu-cuda11-8
+#
+# To verify GPU support:
+# python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available()); print('device_count', torch.cuda.device_count()); print('device_name', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'N/A')"

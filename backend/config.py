@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Optional
 
 class Config:
-    """Production-ready configuration management"""
+    """Configuration management"""
     
     # Project paths
     PROJECT_ROOT = Path(__file__).parent.parent

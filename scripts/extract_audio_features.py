@@ -9,8 +9,11 @@ import librosa
 import librosa.display
 import matplotlib.pyplot as plt
 import pickle
+import json
 from pathlib import Path
 from tqdm import tqdm
+from multiprocessing import Pool, cpu_count
+import argparse
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -22,6 +25,7 @@ RAW_AUDIO_DIR = DATA_DIR / 'raw'
 TRACKS_CSV = DATA_DIR / 'metadata' / 'tracks.csv'
 OUTPUT_PKL = DATA_DIR / 'processed' / 'extracted_features.pkl'
 SPECTROGRAMS_DIR = DATA_DIR / 'processed' / 'spectrograms'
+TARGET_GENRES_CONFIG = PROJECT_ROOT / 'config' / 'target_genres.json'
 
 # Audio parameters
 SAMPLE_RATE = 22050
@@ -35,7 +39,18 @@ HOP_LENGTH = 512
 def get_audio_path(track_id):
     """Get path to audio file given track ID"""
     tid_str = f'{int(track_id):06d}'
-    return RAW_AUDIO_DIR / tid_str[:3] / f'{tid_str}.mp3'
+    # Try multiple possible locations (matches prepare_cnn_spectrograms.py)
+    possible_paths = [
+        RAW_AUDIO_DIR / tid_str[:3] / f'{tid_str}.mp3',  # Direct in raw/
+        RAW_AUDIO_DIR / 'fma_large' / tid_str[:3] / f'{tid_str}.mp3',  # FMA large structure
+        RAW_AUDIO_DIR / 'fma_medium' / tid_str[:3] / f'{tid_str}.mp3',  # FMA medium structure
+        RAW_AUDIO_DIR / 'fma_small' / tid_str[:3] / f'{tid_str}.mp3',  # FMA small structure
+    ]
+    for path in possible_paths:
+        if path.exists():
+            return path
+    # Return first path as default (for error messages)
+    return possible_paths[0]
 
 
 def extract_features_from_audio(audio_path):
@@ -102,6 +117,33 @@ def extract_features_from_audio(audio_path):
         return None, None, None
 
 
+def process_single_track(args_tuple):
+    """
+    Process a single track for multiprocessing.
+
+    Args:
+        args_tuple: (track_id, genre_value) tuple
+
+    Returns:
+        dict: Extracted features or None if failed
+    """
+    track_id, genre_value = args_tuple
+
+    audio_path = get_audio_path(track_id)
+    if not audio_path.exists():
+        return None
+
+    features, mel_spec, y = extract_features_from_audio(audio_path)
+    if features is None:
+        return None
+
+    # Add metadata
+    features['track_id'] = track_id
+    features['genre'] = genre_value
+
+    return features
+
+
 def save_spectrogram_example(track_id, mel_spec, genre, save_dir):
     """Save spectrogram visualization for a sample track"""
     fig, ax = plt.subplots(figsize=(10, 4))
@@ -114,7 +156,8 @@ def save_spectrogram_example(track_id, mel_spec, genre, save_dir):
     fig.colorbar(img, ax=ax, format='%+2.0f dB')
 
     # Sanitize genre name for use in filename (remove invalid characters)
-    safe_genre = genre.replace('/', '-').replace('\\', '-').replace(' ', '_')
+    # Use URL-style encoding to avoid conflicts: space→_, slash→-SLASH-, hyphen stays as-is
+    safe_genre = genre.replace('/', '-SLASH-').replace('\\', '-SLASH-').replace(' ', '_')
     save_path = save_dir / f'{safe_genre}_track_{track_id}.png'
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
@@ -124,60 +167,140 @@ def save_spectrogram_example(track_id, mel_spec, genre, save_dir):
 
 
 def main():
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Extract audio features from FMA dataset')
+    parser.add_argument('--num-workers', type=int, default=None,
+                        help='Number of parallel workers (default: CPU count)')
+    parser.add_argument('--samples-per-genre', type=int, default=100,
+                        help='Number of samples per genre to process (default: 100)')
+    parser.add_argument('--max-samples', type=int, default=None,
+                        help='Maximum total samples to process (overrides samples-per-genre)')
+    parser.add_argument('--use-subgenres', action='store_true',
+                        help='Use detailed subgenres instead of top-level genres (50+ genres)')
+    parser.add_argument('--min-samples-per-genre', type=int, default=10,
+                        help='Minimum number of samples per genre to include (default: 10)')
+    parser.add_argument('--num-spectrogram-examples', type=int, default=50,
+                        help='Total number of spectrogram images to generate (default: 50)')
+    parser.add_argument('--spectrograms-per-genre', type=int, default=None,
+                        help='Number of spectrograms per genre (overrides num-spectrogram-examples for even distribution)')
+    args = parser.parse_args()
+
     print("=" * 70)
     print("EXTRACTING AUDIO FEATURES FROM RAW FILES")
     print("=" * 70)
 
+    # Detect audio directory structure
+    print(f"\n1. Detecting audio file location...")
+    audio_subdirs = []
+    for subdir in ['fma_large', 'fma_medium', 'fma_small', '']:
+        test_dir = RAW_AUDIO_DIR / subdir if subdir else RAW_AUDIO_DIR
+        if test_dir.exists():
+            mp3_files = list(test_dir.rglob("*.mp3"))
+            if mp3_files:
+                audio_subdirs.append((subdir if subdir else 'root', len(mp3_files)))
+
+    if audio_subdirs:
+        print(f"   Found audio files:")
+        for subdir, count in audio_subdirs:
+            print(f"     {subdir}: {count:,} files")
+    else:
+        print(f"   ERROR: No audio files found in {RAW_AUDIO_DIR}")
+        print(f"   Please run download_fma.py first")
+        return 1
+
     # Load track metadata
-    print(f"\n1. Loading track metadata from: {TRACKS_CSV.relative_to(PROJECT_ROOT)}")
+    print(f"\n2. Loading track metadata from: {TRACKS_CSV.relative_to(PROJECT_ROOT)}")
     tracks_df = pd.read_csv(TRACKS_CSV, index_col=0, header=[0, 1])
 
-    # Get genre information
-    genre_col = ('track', 'genre_top')
-    tracks_with_genre = tracks_df[tracks_df[genre_col].notna()].copy()
-    tracks_with_genre['genre'] = tracks_with_genre[genre_col]
+    # Get genre information based on user choice
+    if args.use_subgenres:
+        print("   Using subgenres (detailed genre classification)")
+        # Use the 'genres' column which contains lists of genre IDs
+        # First load the genres mapping
+        genres_csv = DATA_DIR / "metadata" / "genres.csv"
+        genres_df = pd.read_csv(genres_csv, index_col=0)
+
+        # Get tracks with genres
+        genre_col = ('track', 'genres')
+        tracks_with_genre = tracks_df[tracks_df[genre_col].notna()].copy()
+
+        # Parse the genres (they're stored as stringified lists like "[21, 456]")
+        import ast
+        tracks_with_genre['genre_ids'] = tracks_with_genre[genre_col].apply(
+            lambda x: ast.literal_eval(x) if isinstance(x, str) and x.startswith('[') else []
+        )
+
+        # Take the first genre for each track (or we could do multi-label for all)
+        tracks_with_genre['genre_id'] = tracks_with_genre['genre_ids'].apply(
+            lambda x: x[0] if x else None
+        )
+        tracks_with_genre = tracks_with_genre[tracks_with_genre['genre_id'].notna()]
+
+        # Map genre IDs to genre titles
+        genre_id_to_title = genres_df['title'].to_dict()
+        tracks_with_genre['genre'] = tracks_with_genre['genre_id'].map(genre_id_to_title)
+
+        # Remove any tracks where genre mapping failed
+        tracks_with_genre = tracks_with_genre[tracks_with_genre['genre'].notna()]
+    else:
+        print("   Using top-level genres (16 main categories)")
+        genre_col = ('track', 'genre_top')
+        tracks_with_genre = tracks_df[tracks_df[genre_col].notna()].copy()
+        tracks_with_genre['genre'] = tracks_with_genre[genre_col]
 
     print(f"   Found {len(tracks_with_genre)} tracks with genre labels")
     print(f"   Genres: {tracks_with_genre['genre'].nunique()}")
 
+    # Filter to target genres for academic project
+    if args.use_subgenres:
+        # Load target genres from config
+        if TARGET_GENRES_CONFIG.exists():
+            with open(TARGET_GENRES_CONFIG, 'r') as f:
+                genre_config = json.load(f)
+                target_genres = genre_config['genres']
+            print(f"   Filtering to {len(target_genres)} target genres from config...")
+        else:
+            print(f"   Warning: {TARGET_GENRES_CONFIG} not found, using all genres")
+            target_genres = None
+        
+        if target_genres:
+            tracks_with_genre = tracks_with_genre[tracks_with_genre['genre'].isin(target_genres)]
+            print(f"   After genre filtering: {len(tracks_with_genre)} tracks, {tracks_with_genre['genre'].nunique()} genres")
+            
+            # Show which target genres were found
+            found_genres = set(tracks_with_genre['genre'].unique())
+            missing_genres = set(target_genres) - found_genres
+            if missing_genres:
+                print(f"   Note: {len(missing_genres)} target genres not found in dataset: {list(missing_genres)[:3]}...")
+
+    # Filter out genres with too few samples
+    if args.min_samples_per_genre > 0:
+        genre_counts = tracks_with_genre['genre'].value_counts()
+        valid_genres = genre_counts[genre_counts >= args.min_samples_per_genre].index
+        tracks_with_genre = tracks_with_genre[tracks_with_genre['genre'].isin(valid_genres)]
+        print(f"   After filtering (min {args.min_samples_per_genre} samples/genre): {len(tracks_with_genre)} tracks, {len(valid_genres)} genres")
+
     # Sample tracks for processing (use subset for faster processing)
-    # Take 100 tracks per genre for balanced dataset
-    print("\n2. Sampling tracks (100 per genre for speed)...")
+    print(f"\n3. Sampling tracks ({args.samples_per_genre} per genre)...")
 
     sampled_tracks = []
     for genre in tracks_with_genre['genre'].unique():
         genre_tracks = tracks_with_genre[tracks_with_genre['genre'] == genre]
-        n_samples = min(100, len(genre_tracks))
+        n_samples = min(args.samples_per_genre, len(genre_tracks))
         sampled = genre_tracks.sample(n=n_samples, random_state=42)
         sampled_tracks.append(sampled)
 
     tracks_to_process = pd.concat(sampled_tracks)
+
+    # Apply max_samples limit if specified
+    if args.max_samples:
+        tracks_to_process = tracks_to_process.head(args.max_samples)
+
     print(f"   Selected {len(tracks_to_process)} tracks for processing")
 
-    # Extract features
-    print("\n3. Extracting audio features...")
-    SPECTROGRAMS_DIR.mkdir(parents=True, exist_ok=True)
-
-    features_list = []
-    spectrograms_saved = {}
-
-    for idx, (track_id, row) in enumerate(tqdm(tracks_to_process.iterrows(),
-                                                 total=len(tracks_to_process),
-                                                 desc="Processing audio")):
-        audio_path = get_audio_path(track_id)
-
-        if not audio_path.exists():
-            continue
-
-        features, mel_spec, y = extract_features_from_audio(audio_path)
-
-        if features is None:
-            continue
-
-        # Add metadata
-        features['track_id'] = track_id
-
-        # Extract genre (handle both string and Series)
+    # Prepare track data for multiprocessing
+    track_data = []
+    for track_id, row in tracks_to_process.iterrows():
         genre = row['genre']
         if isinstance(genre, pd.Series):
             genre_value = str(genre.iloc[0])
@@ -185,21 +308,72 @@ def main():
             genre_value = genre
         else:
             genre_value = str(genre)
+        track_data.append((track_id, genre_value))
 
-        features['genre'] = genre_value
+    # Extract features with multiprocessing
+    print("\n4. Extracting audio features with multiprocessing...")
+    num_workers = args.num_workers if args.num_workers else cpu_count()
+    print(f"   Using {num_workers} parallel workers")
+    SPECTROGRAMS_DIR.mkdir(parents=True, exist_ok=True)
 
-        features_list.append(features)
+    features_list = []
 
-        # Save spectrogram examples (5 per genre)
-        if genre_value not in spectrograms_saved:
-            spectrograms_saved[genre_value] = 0
+    with Pool(num_workers) as pool:
+        results = list(tqdm(
+            pool.imap(process_single_track, track_data),
+            total=len(track_data),
+            desc="Processing audio"
+        ))
 
-        if spectrograms_saved[genre_value] < 5 and mel_spec is not None:
-            save_spectrogram_example(track_id, mel_spec, genre_value, SPECTROGRAMS_DIR)
-            spectrograms_saved[genre_value] += 1
+    # Collect valid results
+    for result in results:
+        if result is not None:
+            features_list.append(result)
+
+    # Save spectrogram examples - do this separately for visualization
+    print("\n   Generating example spectrograms...")
+    spectrograms_saved = {}
+
+    if args.spectrograms_per_genre:
+        # Per-genre distribution: save N spectrograms per genre
+        print(f"   Target: {args.spectrograms_per_genre} spectrograms per genre")
+        for track_id, genre_value in tqdm(track_data, desc="Saving examples"):
+            if genre_value not in spectrograms_saved:
+                spectrograms_saved[genre_value] = 0
+
+            if spectrograms_saved[genre_value] < args.spectrograms_per_genre:
+                audio_path = get_audio_path(track_id)
+                if audio_path.exists():
+                    _, mel_spec, _ = extract_features_from_audio(audio_path)
+                    if mel_spec is not None:
+                        save_spectrogram_example(track_id, mel_spec, genre_value, SPECTROGRAMS_DIR)
+                        spectrograms_saved[genre_value] += 1
+    else:
+        # Random mix: save up to num_spectrogram_examples total
+        print(f"   Target: {args.num_spectrogram_examples} spectrograms (random mix)")
+        total_saved = 0
+        for track_id, genre_value in tqdm(track_data, desc="Saving examples"):
+            if total_saved >= args.num_spectrogram_examples:
+                break
+
+            audio_path = get_audio_path(track_id)
+            if audio_path.exists():
+                _, mel_spec, _ = extract_features_from_audio(audio_path)
+                if mel_spec is not None:
+                    save_spectrogram_example(track_id, mel_spec, genre_value, SPECTROGRAMS_DIR)
+                    if genre_value not in spectrograms_saved:
+                        spectrograms_saved[genre_value] = 0
+                    spectrograms_saved[genre_value] += 1
+                    total_saved += 1
 
     # Create DataFrame
-    print(f"\n4. Creating feature dataframe...")
+    print(f"\n5. Creating feature dataframe...")
+
+    if not features_list:
+        print("\n   ERROR: No features were extracted!")
+        print("   This usually means audio files were not found.")
+        print(f"   Check that audio files exist in: {RAW_AUDIO_DIR}")
+        return 1
     df_features = pd.DataFrame(features_list)
 
     # Create genre_idx
@@ -220,6 +394,22 @@ def main():
     with open(OUTPUT_PKL, 'wb') as f:
         pickle.dump(df_features, f)
 
+    # Save genre names file (preserving order from target_genres.json for consistency)
+    # This ensures spectrogram filenames and genre indices match
+    if args.use_subgenres and TARGET_GENRES_CONFIG.exists():
+        with open(TARGET_GENRES_CONFIG, 'r') as f:
+            genre_config = json.load(f)
+            config_genres = genre_config['genres']
+        
+        # Filter to only genres that actually have spectrograms
+        genres_with_data = [g for g in config_genres if g in df_features['genre'].values]
+        
+        genre_names_file = OUTPUT_PKL.parent / f'genre_names_{len(genres_with_data)}.json'
+        with open(genre_names_file, 'w') as f:
+            json.dump(genres_with_data, f, indent=2)
+        print(f"\nSaved genre names: {genre_names_file.relative_to(PROJECT_ROOT)}")
+        print(f"  Genre order preserved from config file (not alphabetically sorted)")
+
     print("\nSUCCESS!")
     print(f"  Features: {OUTPUT_PKL.relative_to(PROJECT_ROOT)}")
     print(f"  Size: {OUTPUT_PKL.stat().st_size / 1024 / 1024:.2f} MB")
@@ -228,6 +418,8 @@ def main():
     print("=" * 70)
 
     print("\nNext steps:")
+    print("  - Prepare CNN spectrograms: python scripts/prepare_cnn_spectrograms.py")
+    print("  - Train model: python scripts/train_multilabel_cnn.py")
     print("  - Run EDA notebook: jupyter notebook notebooks/01_EDA.ipynb")
     print("  - View spectrograms in:", SPECTROGRAMS_DIR.relative_to(PROJECT_ROOT))
 

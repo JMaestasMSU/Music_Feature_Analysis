@@ -1,0 +1,27 @@
+{
+  "description": "Target genres for academic project dataset",
+  "genres": [
+    "Experimental",
+    "Electronic",
+    "Rock",
+    "Instrumental",
+    "Pop",
+    "Folk",
+    "Hip-Hop",
+    "International",
+    "Classical",
+    "Old-Time / Historic",
+    "Jazz",
+    "Country",
+    "Soul-RnB",
+    "Blues",
+    "Spoken",
+    "Easy Listening",
+    "Avant-Garde",
+    "Punk",
+    "Metal",
+    "Ambient Electronic",
+    "Techno",
+    "House"
+  ]
+}

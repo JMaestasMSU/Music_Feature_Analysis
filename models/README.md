@@ -1,6 +1,6 @@
 # Models Directory
 
-This directory contains production-ready machine learning models for music genre classification.
+This directory contains machine learning models for music genre classification.
 
 ---
 
