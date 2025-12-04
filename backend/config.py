@@ -25,7 +25,7 @@ class Config:
     HOP_LENGTH = 512
     
     # CNN Model
-    CNN_MODEL_PATH = MODELS_DIR / "cnn_best_model.pt"
+    CNN_MODEL_PATH = MODELS_DIR / "models" / "trained_models" / "multilabel_cnn_filtered_improved" / "best_model.pt"
     MODEL_INPUT_SIZE = (128, 216)  # (n_mels, time_steps)
     
     # API Configuration

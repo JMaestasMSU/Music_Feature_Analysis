@@ -1,747 +1,677 @@
 """
-Production FastAPI Backend for Music Genre Classification
-Handles audio file uploads, feature extraction, and genre prediction.
+Unified FastAPI backend for genre prediction.
+Supports both single-label (feature-based) and multi-label (CNN-based) models.
 """
 
-import sys
-from pathlib import Path
-from typing import List, Optional, Dict, Any, cast
-import tempfile
-import os
-import pickle
-from contextlib import asynccontextmanager
-
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 import uvicorn
+import tempfile
+from pathlib import Path
+from typing import List, Optional, Dict, Any
+import time
+import sys
 import numpy as np
+import logging
 
-# Add parent directory for imports
-sys.path.append(str(Path(__file__).parent.parent))
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-from scripts.feature_extraction import extract_features, features_to_array
-from models.genre_classifier import GenreClassifier, ModelWrapper
-from models.model_utils import load_production_model
+# Add project root to path
+PROJECT_ROOT = Path(__file__).parent.parent
+sys.path.append(str(PROJECT_ROOT / "backend"))
 
+from services.prediction_service import PredictionService
+from services.feature_service import FeatureService
+from services.matlab_interface import MATLABInterface
 
 # ============================================================================
 # Configuration
 # ============================================================================
 
-class Config:
-    """Application configuration."""
-    APP_NAME = "Music Genre Classification API"
-    VERSION = "1.0.0"
-    MODEL_DIR = "../models/trained_models"
-    MODEL_NAME = "genre_classifier_production"
-    MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
-    ALLOWED_EXTENSIONS = {".mp3", ".wav", ".au", ".flac", ".ogg"}
+# Model directories
+CNN_MODEL_DIR = PROJECT_ROOT / "models" / "trained_models" / "multilabel_cnn_filtered_improved"
+FEATURE_MODEL_DIR = PROJECT_ROOT / "models"  # Contains ml_ready_features.pt
 
-
-config = Config()
-
+# Audio processing config
+SAMPLE_RATE = 22050
+N_MELS = 128
+N_FFT = 2048
+HOP_LENGTH = 512
+DURATION = 30
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
 
 # ============================================================================
-# Pydantic Models (Request/Response Schemas)
+# Response Models
 # ============================================================================
 
-class PredictionRequest(BaseModel):
-    """Request model for direct feature prediction."""
-    features: List[float] = Field(
-        ...,
-        min_length=20,
-        max_length=20,
-        description="Array of 20 audio features (13 MFCCs + spectral centroid + spectral rolloff + ZCR + RMS energy + 3 chroma features)",
-        examples=[[0.1, -0.5, 0.3, 0.2, -0.1, 0.4, 0.0, -0.2, 0.1, 0.3, -0.4, 0.2, 0.1, 1500.5, 3200.1, 0.05, 0.02, 0.3, 0.4, 0.3]]
-    )
-    return_probs: bool = Field(
-        default=False,
-        description="Whether to return probabilities for all genres"
-    )
-    top_k: int = Field(
-        default=3,
-        ge=1,
-        le=8,
-        description="Number of top predictions to return (1-8)"
-    )
-
+class GenrePrediction(BaseModel):
+    genre: str
+    confidence: float
 
 class TopPrediction(BaseModel):
-    """Single top prediction."""
-    genre: str = Field(description="Genre name")
-    confidence: float = Field(description="Confidence score (0.0-1.0)", ge=0.0, le=1.0)
-
-    model_config = {
-        "json_schema_extra": {
-            "examples": [
-                {"genre": "Rock", "confidence": 0.85}
-            ]
-        }
-    }
-
+    genre: str
+    confidence: float
 
 class PredictionResponse(BaseModel):
-    """Response model for predictions."""
-    predicted_genre: str = Field(description="Most likely genre")
-    confidence: float = Field(description="Confidence of top prediction (0.0-1.0)", ge=0.0, le=1.0)
-    top_predictions: List[TopPrediction] = Field(description="Top K genre predictions ranked by confidence")
-    all_probabilities: Optional[Dict[str, float]] = Field(
-        default=None,
-        description="Probabilities for all genres (only if return_probs=true)"
-    )
-
-    model_config = {
-        "json_schema_extra": {
-            "examples": [
-                {
-                    "predicted_genre": "Rock",
-                    "confidence": 0.85,
-                    "top_predictions": [
-                        {"genre": "Rock", "confidence": 0.85},
-                        {"genre": "Pop", "confidence": 0.10},
-                        {"genre": "Electronic", "confidence": 0.03}
-                    ],
-                    "all_probabilities": {
-                        "Rock": 0.85,
-                        "Pop": 0.10,
-                        "Electronic": 0.03,
-                        "Hip-Hop": 0.01,
-                        "Classical": 0.005,
-                        "Jazz": 0.003,
-                        "Folk": 0.001,
-                        "Experimental": 0.001
-                    }
-                }
-            ]
-        }
-    }
-
+    predicted_genre: str
+    confidence: float
+    top_predictions: List[TopPrediction]
 
 class HealthResponse(BaseModel):
-    """Health check response."""
-    model_config = {"protected_namespaces": ()}
-
     status: str
     app_name: str
     version: str
     model_loaded: bool
     device: str
-
+    available_models: List[str]
 
 class AudioAnalysisResponse(BaseModel):
-    """Response for audio file analysis."""
     filename: str
     duration: float
-    features: Dict[str, Any]
-    prediction: PredictionResponse
+    predicted_genre: str
+    confidence: float
+    top_predictions: List[TopPrediction]
+    processing_time_ms: int
+    all_probabilities: Optional[Dict[str, float]] = None
 
+class BatchPredictionRequest(BaseModel):
+    features_list: List[List[float]] = Field(..., description="List of feature arrays (each 20 elements)")
+    return_probs: bool = False
+    top_k: int = 3
 
-# ============================================================================
-# Global State
-# ============================================================================
+class MultiLabelPredictionResponse(BaseModel):
+    predictions: List[GenrePrediction]
+    threshold: float
+    count: int
+    processing_time_ms: int
 
-model_wrapper: Optional[ModelWrapper] = None
-
-
-# ============================================================================
-# Lifespan Events
-# ============================================================================
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Lifespan event handler for startup and shutdown."""
-    global model_wrapper
-
-    # Startup
-    print(f"Starting {config.APP_NAME} v{config.VERSION}")
-
-    # SIMPLIFIED: Always use same feature file
-    features_pkl = Path("../data/processed/ml_ready_features.pkl")
-
-    if not features_pkl.exists():
-        print(f"  WARNING: {features_pkl} not found")
-        print(f"   Run: python scripts/create_features.py")
-        print(f"   Using untrained model...")
-
-        # Load untrained model
-        model = GenreClassifier(input_dim=20, num_classes=8)
-        genre_names = ['Rock', 'Electronic', 'Hip-Hop', 'Classical', 'Jazz', 'Folk', 'Pop', 'Experimental']
-
-        model_wrapper = ModelWrapper(model=model, scaler=None, genre_names=genre_names, device='cpu')
-    else:
-        # Load real data
-        with open(features_pkl, 'rb') as f:
-            df = pickle.load(f)
-
-        genre_names = sorted(df['genre'].unique())
-
-        # Try loading trained model
-        try:
-            model, scaler, _, _ = load_production_model(
-                model_class=GenreClassifier,
-                model_dir='../models/trained_models',
-                model_name='genre_classifier_production',
-                device='cpu'
-            )
-            print(f" Loaded trained model")
-        except:
-            print(f"  Trained model not found, using untrained")
-            model = GenreClassifier(input_dim=len(df.columns)-1, num_classes=len(genre_names))
-            scaler = None
-
-        model_wrapper = ModelWrapper(model=model, scaler=scaler, genre_names=genre_names, device='cpu')
-        print(f" Model ready: {len(genre_names)} genres")
-
-    yield
-
-    # Shutdown
-    print(f"Shutting down {config.APP_NAME}")
-
+class ModelInfoResponse(BaseModel):
+    model_type: str
+    architecture: str
+    num_genres: int
+    genres: List[str]
+    device: str
+    additional_info: Dict[str, Any]
 
 # ============================================================================
-# FastAPI Application
+# Global Services (loaded at startup)
+# ============================================================================
+
+feature_service = None
+cnn_prediction_service = None
+feature_prediction_service = None
+matlab_interface = None
+
+def load_services():
+    """Load services at startup."""
+    global feature_service, cnn_prediction_service, feature_prediction_service, matlab_interface
+
+    print("\n" + "="*80)
+    print("LOADING UNIFIED GENRE CLASSIFICATION SERVICES")
+    print("="*80)
+
+    # Initialize feature extraction service
+    feature_service = FeatureService(
+        sample_rate=SAMPLE_RATE,
+        n_mels=N_MELS,
+        n_fft=N_FFT,
+        hop_length=HOP_LENGTH
+    )
+    print(f"Feature Service: sample_rate={SAMPLE_RATE}, n_mels={N_MELS}, n_fft={N_FFT}")
+
+    # Initialize CNN prediction service (multi-label)
+    try:
+        cnn_prediction_service = PredictionService(
+            model_type="multi-label",
+            model_dir=CNN_MODEL_DIR
+        )
+        print(f"CNN Model: {cnn_prediction_service.num_genres} genres, device={cnn_prediction_service.device}")
+        print(f"  Architecture: {cnn_prediction_service.model_info.get('architecture', 'unknown')}")
+    except Exception as e:
+        import traceback
+        logger.error(f"Failed to load CNN model: {e}")
+        logger.error(traceback.format_exc())
+        cnn_prediction_service = None
+
+    # Initialize feature-based prediction service (single-label)
+    try:
+        feature_prediction_service = PredictionService(
+            model_type="single-label",
+            model_dir=FEATURE_MODEL_DIR
+        )
+        print(f"Feature Model: {feature_prediction_service.num_genres} genres, device={feature_prediction_service.device}")
+        print(f"  Architecture: {feature_prediction_service.model_info.get('architecture', 'unknown')}")
+    except Exception as e:
+        logger.warning(f"Failed to load feature-based model: {e}")
+        feature_prediction_service = None
+
+    # Initialize MATLAB interface (optional)
+    try:
+        matlab_interface = MATLABInterface()
+        matlab_available = matlab_interface.validate_matlab_available()
+        if matlab_available:
+            print(f"MATLAB Interface: Available (FFT validation enabled)")
+        else:
+            print(f"MATLAB Interface: Not available (using NumPy fallback)")
+    except Exception as e:
+        logger.warning(f"MATLAB interface initialization failed: {e}")
+        matlab_interface = None
+
+    print("="*80 + "\n")
+
+# ============================================================================
+# FastAPI App
 # ============================================================================
 
 app = FastAPI(
-    title=config.APP_NAME,
-    version=config.VERSION,
-    description="""
-## Music Genre Classification API
-
-A production-ready REST API for music genre classification using deep learning.
-
-### Features
-* **Feature-based Prediction**: Classify music from pre-extracted audio features
-* **Audio File Analysis**: Upload audio files for automatic feature extraction and classification
-* **Batch Processing**: Process multiple samples in a single request
-* **Model Information**: Access model metadata and supported genres
-
-### Supported Audio Formats
-MP3, WAV, AU, FLAC, OGG
-
-### Model Architecture
-* Deep neural network trained on audio features
-* 20 input features (MFCCs, spectral features, chroma, etc.)
-* 8 music genres supported
-
-### Quick Start
-1. Check API health: `GET /health`
-2. View supported genres: `GET /genres`
-3. Classify audio: `POST /analyze-audio` or `POST /predict`
-
-### Documentation
-* **Swagger UI**: [/docs](/docs)
-* **ReDoc**: [/redoc](/redoc)
-    """,
-    docs_url="/docs",
-    redoc_url="/redoc",
-    lifespan=lifespan,
-    contact={
-        "name": "Music Genre Classification API",
-        "url": "https://github.com/yourusername/Music_Feature_Analysis",
-    },
-    license_info={
-        "name": "MIT License",
-    }
+    title="Music Genre Classification API (CNN)",
+    description="Multi-label genre prediction using CNN on spectrograms",
+    version="2.0.0"
 )
 
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify actual origins
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+@app.on_event("startup")
+async def startup_event():
+    """Load services on startup."""
+    load_services()
 
-# ============================================================================
-# API Endpoints
-# ============================================================================
-
-@app.get(
-    "/",
-    tags=["Root"],
-    summary="API Root",
-    description="Get API information and navigation links"
-)
+@app.get("/")
 async def root():
-    """
-    # Welcome to Music Genre Classification API
-
-    Returns basic API information and links to documentation.
-    """
-    return {
-        "message": f"Welcome to {config.APP_NAME}",
-        "version": config.VERSION,
-        "docs": "/docs",
-        "health": "/health"
-    }
-
-
-@app.get(
-    "/health",
-    response_model=HealthResponse,
-    tags=["Health"],
-    summary="Health Check",
-    description="Check API health status and model availability"
-)
-async def health_check():
-    """
-    # Health Check Endpoint
-
-    Returns the current health status of the API, including:
-    - Overall API status
-    - Model loading status
-    - Compute device being used (CPU/CUDA)
-
-    **Use this endpoint** to verify the API is running before making predictions.
-    """
-    return HealthResponse(
-        status="healthy" if model_wrapper is not None else "unhealthy",
-        app_name=config.APP_NAME,
-        version=config.VERSION,
-        model_loaded=model_wrapper is not None,
-        device=model_wrapper.device if model_wrapper else "unknown"
-    )
-
-
-@app.post(
-    "/predict",
-    response_model=PredictionResponse,
-    tags=["Prediction"],
-    summary="Predict Genre from Features",
-    description="Classify music genre using pre-extracted audio features",
-    responses={
-        200: {
-            "description": "Successful prediction",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "predicted_genre": "Rock",
-                        "confidence": 0.85,
-                        "top_predictions": [
-                            {"genre": "Rock", "confidence": 0.85},
-                            {"genre": "Pop", "confidence": 0.10},
-                            {"genre": "Electronic", "confidence": 0.03}
-                        ]
-                    }
-                }
-            }
-        },
-        422: {"description": "Validation error - invalid features"},
-        503: {"description": "Model not loaded"}
-    }
-)
-async def predict_from_features(request: PredictionRequest):
-    """
-    # Predict Genre from Audio Features
-
-    Classify music genre using 20 pre-extracted audio features.
-
-    ## Required Features (in order):
-    1-13. **MFCC coefficients** (Mel-frequency cepstral coefficients)
-    14. **Spectral centroid** - brightness of the sound
-    15. **Spectral rolloff** - shape of the signal
-    16. **Zero crossing rate** - percussiveness
-    17. **RMS energy** - loudness
-    18-20. **Chroma features** - harmonic content (3 values)
-
-    ## Example Usage:
-    ```python
-    import requests
-
-    features = [0.1, -0.5, 0.3, ..., 0.4, 0.3]  # 20 features
-    response = requests.post(
-        "http://localhost:8000/predict",
-        json={
-            "features": features,
-            "return_probs": True,
-            "top_k": 3
-        }
-    )
-    ```
-
-    ## Parameters:
-    - **features**: Array of exactly 20 float values
-    - **return_probs**: Set to `true` to get probabilities for all genres
-    - **top_k**: Number of top predictions to return (1-8)
-    """
-    if model_wrapper is None:
-        raise HTTPException(status_code=503, detail="Model not loaded")
+    """Root endpoint with API information."""
+    available_models = []
+    if cnn_prediction_service:
+        available_models.append("multi-label")
+    if feature_prediction_service:
+        available_models.append("single-label")
     
-    try:
-        # Convert to numpy array
-        features = np.array(request.features)
-        
-        # Predict
-        result = model_wrapper.predict(
-            features=features,
-            return_probs=request.return_probs,
-            top_k=request.top_k
-        )
-        
-        return PredictionResponse(**result)
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
-
-
-@app.post(
-    "/analyze-audio",
-    response_model=AudioAnalysisResponse,
-    tags=["Audio Analysis"],
-    summary="Analyze Audio File",
-    description="Upload an audio file for automatic feature extraction and genre classification",
-    responses={
-        200: {"description": "Analysis complete with genre prediction"},
-        400: {"description": "Invalid file type or missing filename"},
-        413: {"description": "File too large (max 50MB)"},
-        500: {"description": "Feature extraction or prediction failed"},
-        503: {"description": "Model not loaded"}
+    matlab_status = "unavailable"
+    if matlab_interface:
+        matlab_status = "available" if matlab_interface.validate_matlab_available() else "fallback"
+    
+    return {
+        "message": "Unified Music Genre Classification API",
+        "version": "2.0.0",
+        "available_models": available_models,
+        "matlab_fft": matlab_status,
+        "endpoints": {
+            "predict_features": "POST /predict",
+            "analyze_audio": "POST /analyze-audio",
+            "predict_multilabel": "POST /api/v1/analysis/predict-multilabel",
+            "batch_predict": "POST /batch-predict",
+            "genres": "GET /genres",
+            "model_info": "GET /model/info",
+            "health": "GET /health",
+            "matlab_status": "GET /matlab/status",
+            "fft_analysis": "POST /api/v1/analysis/fft-analysis",
+            "validate_features": "POST /api/v1/analysis/validate-features",
+            "docs": "/docs"
+        }
     }
-)
-async def analyze_audio_file(
-    file: UploadFile = File(..., description="Audio file to analyze"),
+
+@app.get("/health", response_model=HealthResponse)
+async def health():
+    """Health check endpoint."""
+    models_loaded = []
+    if cnn_prediction_service:
+        models_loaded.append("multi-label")
+    if feature_prediction_service:
+        models_loaded.append("single-label")
+    
+    device = "unknown"
+    if cnn_prediction_service:
+        device = str(cnn_prediction_service.device)
+    elif feature_prediction_service:
+        device = str(feature_prediction_service.device)
+    
+    return HealthResponse(
+        status="healthy" if models_loaded else "degraded",
+        app_name="Music Genre Classification API",
+        version="2.0.0",
+        model_loaded=len(models_loaded) > 0,
+        device=device,
+        available_models=models_loaded
+    )
+
+@app.get("/genres")
+async def get_genres(model_type: str = Query("multi-label", description="Model type: single-label or multi-label")):
+    """Get list of supported genres for specified model."""
+    if model_type == "single-label" and feature_prediction_service:
+        return {
+            "model_type": "single-label",
+            "genres": feature_prediction_service.genre_names,
+            "count": feature_prediction_service.num_genres
+        }
+    elif model_type == "multi-label" and cnn_prediction_service:
+        return {
+            "model_type": "multi-label",
+            "genres": cnn_prediction_service.genre_names,
+            "count": cnn_prediction_service.num_genres
+        }
+    else:
+        raise HTTPException(status_code=404, detail=f"Model type '{model_type}' not available")
+
+@app.get("/model/info", response_model=ModelInfoResponse)
+async def model_info(model_type: str = Query("multi-label", description="Model type: single-label or multi-label")):
+    """Get model information for specified model."""
+    if model_type == "single-label" and feature_prediction_service:
+        info = feature_prediction_service.model_info
+        return ModelInfoResponse(
+            model_type=info['model_type'],
+            architecture=info['architecture'],
+            num_genres=info['num_genres'],
+            genres=info['genres'],
+            device=info['device'],
+            additional_info={k: v for k, v in info.items() if k not in ['model_type', 'architecture', 'num_genres', 'genres', 'device']}
+        )
+    elif model_type == "multi-label" and cnn_prediction_service:
+        info = cnn_prediction_service.model_info
+        return ModelInfoResponse(
+            model_type=info['model_type'],
+            architecture=info['architecture'],
+            num_genres=info['num_genres'],
+            genres=info['genres'],
+            device=info['device'],
+            additional_info={k: v for k, v in info.items() if k not in ['model_type', 'architecture', 'num_genres', 'genres', 'device']}
+        )
+    else:
+        raise HTTPException(status_code=404, detail=f"Model type '{model_type}' not available")
+
+# ============================================================================
+# Main Prediction Endpoints
+# ============================================================================
+
+@app.post("/predict", response_model=PredictionResponse)
+async def predict_from_features(
+    features: List[float],
     return_probs: bool = False,
     top_k: int = 3
 ):
     """
-    # Analyze Audio File and Predict Genre
-
-    Upload an audio file and get automatic genre classification.
-
-    ## Process:
-    1. **Upload** audio file (MP3, WAV, AU, FLAC, OGG)
-    2. **Extract** 20 audio features automatically using librosa
-    3. **Predict** genre using trained neural network
-    4. **Return** prediction results and extracted features
-
-    ## Supported Formats:
-    - MP3
-    - WAV
-    - AU
-    - FLAC
-    - OGG
-
-    ## Constraints:
-    - **Max file size**: 50 MB
-    - **Duration**: First 30 seconds analyzed
-    - **Sample rate**: Resampled to 22,050 Hz
-
-    ## Example Usage (curl):
-    ```bash
-    curl -X POST "http://localhost:8000/analyze-audio" \\
-      -F "file=@song.mp3" \\
-      -F "return_probs=true" \\
-      -F "top_k=3"
-    ```
-
-    ## Example Usage (Python):
-    ```python
-    import requests
-
-    with open("song.mp3", "rb") as f:
-        response = requests.post(
-            "http://localhost:8000/analyze-audio",
-            files={"file": f},
-            params={"return_probs": True, "top_k": 3}
-        )
-    ```
+    Predict genre from hand-crafted audio features (single-label model).
+    
+    Args:
+        features: 20-dimensional feature vector
+        return_probs: Whether to return all class probabilities
+        top_k: Number of top predictions to return
+        
+    Returns:
+        PredictionResponse with top genre predictions
     """
-    if model_wrapper is None:
-        raise HTTPException(status_code=503, detail="Model not loaded")
+    if not feature_prediction_service:
+        raise HTTPException(status_code=503, detail="Feature-based model not available")
     
-    # Validate file extension
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="No filename provided")
-    file_ext = Path(file.filename).suffix.lower()
-    if file_ext not in config.ALLOWED_EXTENSIONS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"File type {file_ext} not supported. Allowed: {config.ALLOWED_EXTENSIONS}"
-        )
+    if len(features) != 20:
+        raise HTTPException(status_code=400, detail="Expected 20 features, got {len(features)}")
     
-    # Validate file size
-    file_content = await file.read()
-    if len(file_content) > config.MAX_FILE_SIZE:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File too large. Max size: {config.MAX_FILE_SIZE / 1024 / 1024} MB"
-        )
-    
-    # Save to temporary file
     try:
-        with tempfile.NamedTemporaryFile(suffix=file_ext, delete=False) as tmp:
-            tmp.write(file_content)
+        features_array = np.array(features)
+        result = feature_prediction_service.predict_from_features(
+            features_array,
+            top_k=top_k,
+            return_probs=return_probs
+        )
+        
+        top_preds = [TopPrediction(**p) for p in result['top_predictions']]
+        
+        response = PredictionResponse(
+            predicted_genre=result['predicted_genre'],
+            confidence=result['confidence'],
+            top_predictions=top_preds
+        )
+        
+        return response
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
+
+@app.post("/analyze-audio", response_model=AudioAnalysisResponse)
+async def analyze_audio(
+    file: UploadFile = File(...),
+    model_type: str = Query("multi-label", description="Model type: single-label or multi-label"),
+    return_probs: bool = False,
+    top_k: int = 5
+):
+    """
+    Analyze audio file and return genre predictions.
+    Supports both single-label (feature-based) and multi-label (CNN) models.
+
+    Args:
+        file: Audio file (MP3, WAV, FLAC, etc.)
+        model_type: "single-label" or "multi-label"
+        return_probs: Whether to return all genre probabilities
+        top_k: Number of top predictions
+
+    Returns:
+        AudioAnalysisResponse with predictions
+    """
+    start_time = time.time()
+
+    if not file.filename.lower().endswith(('.mp3', '.wav', '.flac', '.ogg', '.au')):
+        raise HTTPException(status_code=400, detail="Unsupported file format")
+    
+    # Validate requested model is available
+    if model_type == "single-label" and not feature_prediction_service:
+        raise HTTPException(status_code=503, detail="Single-label model not loaded")
+    if model_type == "multi-label" and not cnn_prediction_service:
+        raise HTTPException(status_code=503, detail="Multi-label CNN model not loaded")
+
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=Path(file.filename).suffix) as tmp:
+            content = await file.read()
+            if len(content) > MAX_FILE_SIZE:
+                raise HTTPException(status_code=400, detail="File too large (max 50MB)")
+            tmp.write(content)
             tmp_path = tmp.name
+
+        metadata = feature_service.get_audio_metadata(tmp_path)
         
-        # Extract features
-        features_dict = extract_features(tmp_path, sr=22050, duration=30.0)
-        
-        if features_dict is None:
-            raise HTTPException(status_code=500, detail="Feature extraction failed")
-        
-        # Convert to array
-        feature_array = features_to_array(features_dict)
-        
-        # Predict
-        prediction_result = model_wrapper.predict(
-            features=feature_array,
-            return_probs=return_probs,
-            top_k=top_k
+        if model_type == "single-label" and feature_prediction_service:
+            features = feature_service.extract_hand_crafted_features(tmp_path)
+            result = feature_prediction_service.predict_from_features(features, top_k=top_k, return_probs=return_probs)
+            
+        elif model_type == "multi-label" and cnn_prediction_service:
+            mel_spec = feature_service.extract_spectrogram(tmp_path, duration=DURATION)
+            result = cnn_prediction_service.predict_from_spectrogram(mel_spec, top_k=top_k)
+            
+            if return_probs:
+                result['all_probabilities'] = cnn_prediction_service.get_all_probabilities(mel_spec, input_type="spectrogram")
+        else:
+            raise HTTPException(status_code=404, detail=f"Model type '{model_type}' not available")
+
+        top_preds = [TopPrediction(**p) for p in result['top_predictions']]
+        response = AudioAnalysisResponse(
+            filename=metadata['filename'],
+            duration=metadata['duration'],
+            predicted_genre=result['predicted_genre'],
+            confidence=result['confidence'],
+            top_predictions=top_preds,
+            processing_time_ms=int((time.time() - start_time) * 1000),
+            all_probabilities=result.get('all_probabilities')
         )
-        
-        # Clean up
-        os.unlink(tmp_path)
-        
-        return AudioAnalysisResponse(
-            filename=file.filename,
-            duration=features_dict.get('duration', 30.0),
-            features=features_dict,
-            prediction=PredictionResponse(**prediction_result)
-        )
-        
+
+        Path(tmp_path).unlink()
+        return response
+
     except HTTPException:
         raise
     except Exception as e:
-        # Clean up temp file if it exists
-        if 'tmp_path' in locals():
-            try:
-                os.unlink(tmp_path)
-            except:
-                pass
-        raise HTTPException(status_code=500, detail=f"Audio analysis failed: {str(e)}")
+        import traceback
+        error_msg = str(e) or "Unknown error occurred"
+        logger.error(f"Error analyzing audio: {error_msg}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Error processing audio: {error_msg}")
 
-
-@app.post(
-    "/batch-predict",
-    tags=["Batch Operations"],
-    summary="Batch Genre Prediction",
-    description="Predict genres for multiple audio feature sets in a single request",
-    responses={
-        200: {"description": "Batch prediction successful"},
-        400: {"description": "Batch size exceeds limit (max 100)"},
-        503: {"description": "Model not loaded"}
-    }
-)
-async def batch_predict(requests: List[PredictionRequest]):
+@app.post("/api/v1/analysis/predict-multilabel", response_model=MultiLabelPredictionResponse)
+async def predict_multilabel(
+    file: UploadFile = File(...),
+    threshold: float = 0.3
+):
     """
-    # Batch Genre Prediction
+    Multi-label prediction endpoint (returns all genres above threshold).
 
-    Classify multiple audio samples efficiently in a single API call.
+    Args:
+        file: Audio file
+        threshold: Minimum confidence threshold
 
-    ## Benefits:
-    - **Reduced latency**: Single network call for multiple predictions
-    - **Efficient processing**: Batch inference optimization
-    - **Bulk analysis**: Process entire playlists or albums
-
-    ## Constraints:
-    - **Maximum batch size**: 100 samples per request
-    - Each sample requires exactly 20 features
-
-    ## Example Usage:
-    ```python
-    import requests
-
-    batch = [
-        {
-            "features": [0.1, -0.5, ..., 0.3],  # Song 1
-            "return_probs": False,
-            "top_k": 1
-        },
-        {
-            "features": [0.2, -0.3, ..., 0.4],  # Song 2
-            "return_probs": False,
-            "top_k": 1
-        }
-    ]
-
-    response = requests.post(
-        "http://localhost:8000/batch-predict",
-        json=batch
-    )
-    ```
+    Returns:
+        All genres above threshold with confidences
     """
-    if model_wrapper is None:
-        raise HTTPException(status_code=503, detail="Model not loaded")
+    if not cnn_prediction_service:
+        raise HTTPException(status_code=503, detail="Multi-label model not available")
     
-    if len(requests) > 100:
-        raise HTTPException(status_code=400, detail="Batch size limited to 100")
-    
+    start_time = time.time()
+
+    if not file.filename.lower().endswith(('.mp3', '.wav', '.flac', '.ogg', '.au')):
+        raise HTTPException(status_code=400, detail="Unsupported file format")
+
     try:
-        results = []
-        for req in requests:
-            features = np.array(req.features)
-            result = model_wrapper.predict(
-                features=features,
-                return_probs=req.return_probs,
-                top_k=req.top_k
-            )
-            results.append(PredictionResponse(**result))
+        with tempfile.NamedTemporaryFile(delete=False, suffix=Path(file.filename).suffix) as tmp:
+            content = await file.read()
+            if len(content) > MAX_FILE_SIZE:
+                raise HTTPException(status_code=400, detail="File too large (max 50MB)")
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        mel_spec = feature_service.extract_spectrogram(tmp_path, duration=DURATION)
+        above_threshold = cnn_prediction_service.predict_multi_label(mel_spec, threshold=threshold)
         
-        return results
-        
+        Path(tmp_path).unlink()
+
+        predictions = [GenrePrediction(**p) for p in above_threshold]
+        return MultiLabelPredictionResponse(
+            predictions=predictions,
+            threshold=threshold,
+            count=len(predictions),
+            processing_time_ms=int((time.time() - start_time) * 1000)
+        )
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Batch prediction failed: {str(e)}")
+        logger.error(f"Error in multi-label prediction: {e}")
+        raise HTTPException(status_code=500, detail=f"Error processing audio: {str(e)}")
 
-
-@app.get(
-    "/genres",
-    tags=["Model Information"],
-    summary="Get Supported Genres",
-    description="Returns the list of music genres that the model can classify"
-)
-async def get_genres():
+@app.post("/batch-predict")
+async def batch_predict(request: BatchPredictionRequest):
     """
-    # Get Supported Genres
-
-    Returns all music genres that the model can classify.
-
-    ## Response:
-    - **genres**: Array of genre names
-    - **count**: Total number of genres
-
-    ## Example Response:
-    ```json
-    {
-        "genres": [
-            "Rock",
-            "Electronic",
-            "Hip-Hop",
-            "Classical",
-            "Jazz",
-            "Folk",
-            "Pop",
-            "Experimental"
-        ],
-        "count": 8
-    }
-    ```
-    """
-    if model_wrapper is None:
-        raise HTTPException(status_code=503, detail="Model not loaded")
-
-    return {
-        "genres": model_wrapper.genre_names,
-        "count": len(model_wrapper.genre_names)
-    }
-
-
-@app.get(
-    "/model/info",
-    tags=["Model Information"],
-    summary="Get Model Information",
-    description="Returns detailed information about the loaded model"
-)
-async def get_model_info():
-    """
-    # Get Model Information
-
-    Returns metadata and configuration details about the loaded classification model.
-
-    ## Response Fields:
-    - **status**: Model loading status
-    - **device**: Compute device (CPU or CUDA)
-    - **num_classes**: Number of genre classes
-    - **genre_names**: List of supported genres
-    - **input_features**: Number of input features expected (20)
-
-    ## Example Response:
-    ```json
-    {
-        "status": "loaded",
-        "device": "cpu",
-        "num_classes": 8,
-        "genre_names": ["Rock", "Electronic", "Hip-Hop", "Classical", "Jazz", "Folk", "Pop", "Experimental"],
-        "input_features": 20
-    }
-    ```
-    """
-    if model_wrapper is None:
-        raise HTTPException(status_code=503, detail="Model not loaded")
-
-    return {
-        'status': 'loaded',
-        'device': model_wrapper.device,
-        'num_classes': len(model_wrapper.genre_names),
-        'genre_names': model_wrapper.genre_names,
-        'input_features': model_wrapper.model.input_dim if hasattr(model_wrapper.model, 'input_dim') else 20,
-    }
-
-
-# Add new endpoint for multi-label prediction
-@app.post("/api/v1/analysis/predict-multilabel")
-async def predict_multilabel(file: UploadFile = File(...), threshold: float = 0.3):
-    """
-    Multi-label genre classification endpoint.
+    Batch prediction from multiple feature arrays (single-label model only).
     
     Args:
-        file: Audio file (WAV, MP3, FLAC)
-        threshold: Probability threshold for genre inclusion (default: 0.3)
-    
+        request: BatchPredictionRequest with features_list, return_probs, top_k
+        
     Returns:
-        List of genres with probabilities above threshold
+        List of predictions for each feature array
     """
-    try:
-        # Save uploaded file temporarily
-        temp_path = f"/tmp/{file.filename}"
-        with open(temp_path, "wb") as f:
-            f.write(await file.read())
-        
-        # Extract features (spectrogram)
-        # TODO: Implement feature extraction
-        features = extract_spectrogram(temp_path)
-        
-        # Call model server for prediction
-        # TODO: Implement model server call
-        predictions = call_model_server(features, mode="multilabel")
-        
-        # Filter by threshold
-        results = []
-        for genre, prob in predictions.items():
-            if prob >= threshold:
-                results.append({"genre": genre, "probability": float(prob)})
-        
-        # Sort by probability
-        results.sort(key=lambda x: x["probability"], reverse=True)
-        
-        return {
-            "status": "success",
-            "file": file.filename,
-            "threshold": threshold,
-            "genres": results,
-            "num_genres": len(results)
-        }
+    if not feature_prediction_service:
+        raise HTTPException(status_code=503, detail="Feature-based model not available")
     
+    if len(request.features_list) > 100:
+        raise HTTPException(status_code=400, detail="Maximum 100 samples per batch")
+    
+    try:
+        results = []
+        for i, features in enumerate(request.features_list):
+            if len(features) != 20:
+                raise HTTPException(status_code=400, detail=f"Sample {i}: Expected 20 features, got {len(features)}")
+            
+            features_array = np.array(features)
+            result = feature_prediction_service.predict_from_features(
+                features_array,
+                top_k=request.top_k,
+                return_probs=request.return_probs
+            )
+            
+            results.append(result)
+        
+        return {"predictions": results, "count": len(results)}
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
+        logger.error(f"Batch prediction error: {e}")
+        raise HTTPException(status_code=500, detail=f"Batch prediction error: {str(e)}")
 
 # ============================================================================
-# Main Entry Point
+# MATLAB FFT Validation Endpoints
+# ============================================================================
+
+class FFTAnalysisResponse(BaseModel):
+    spectral_centroid: float
+    spectral_spread: float
+    spectral_rolloff: float
+    time_domain_energy: float
+    freq_domain_energy: float
+    source: str
+    filename: str
+    duration: float
+    processing_time_ms: int
+
+class FFTComparisonResponse(BaseModel):
+    fft_analysis: Dict[str, Any]
+    ml_features: Dict[str, Any]
+    correlation: Dict[str, Any]
+    filename: str
+
+@app.get("/matlab/status")
+async def matlab_status():
+    """
+    Check MATLAB availability status.
+    
+    Returns:
+        MATLAB status and version information
+    """
+    if not matlab_interface:
+        return {
+            "available": False,
+            "status": "MATLAB interface not initialized"
+        }
+    
+    is_available = matlab_interface.validate_matlab_available()
+    
+    return {
+        "available": is_available,
+        "status": "MATLAB ready" if is_available else "MATLAB not found (using NumPy fallback)",
+        "fallback_available": True
+    }
+
+@app.post("/api/v1/analysis/fft-analysis", response_model=FFTAnalysisResponse)
+async def fft_analysis(file: UploadFile = File(...)):
+    """
+    Perform FFT spectral analysis on audio file using MATLAB (or NumPy fallback).
+    
+    Computes:
+    - Spectral centroid (center of mass in frequency domain)
+    - Spectral spread (dispersion around centroid)
+    - Spectral rolloff (95th percentile frequency)
+    - Parseval's theorem validation (time vs frequency domain energy)
+    
+    Args:
+        file: Audio file (MP3, WAV, FLAC, etc.)
+        
+    Returns:
+        FFT analysis results with spectral features
+    """
+    if not matlab_interface:
+        raise HTTPException(status_code=503, detail="MATLAB interface not available")
+    
+    start_time = time.time()
+    
+    if not file.filename.lower().endswith(('.mp3', '.wav', '.flac', '.ogg', '.au')):
+        raise HTTPException(status_code=400, detail="Unsupported file format")
+    
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=Path(file.filename).suffix) as tmp:
+            content = await file.read()
+            if len(content) > MAX_FILE_SIZE:
+                raise HTTPException(status_code=400, detail="File too large (max 50MB)")
+            tmp.write(content)
+            tmp_path = tmp.name
+        
+        # Load audio
+        audio, sr = feature_service.load_audio(tmp_path)
+        metadata = feature_service.get_audio_metadata(tmp_path)
+        
+        # Run FFT analysis via MATLAB (or NumPy fallback)
+        fft_results = matlab_interface.run_fft_analysis(audio, sr)
+        
+        Path(tmp_path).unlink()
+        
+        return FFTAnalysisResponse(
+            spectral_centroid=fft_results['spectral_centroid'],
+            spectral_spread=fft_results['spectral_spread'],
+            spectral_rolloff=fft_results['spectral_rolloff'],
+            time_domain_energy=fft_results['time_domain_energy'],
+            freq_domain_energy=fft_results['freq_domain_energy'],
+            source=fft_results['source'],
+            filename=metadata['filename'],
+            duration=metadata['duration'],
+            processing_time_ms=int((time.time() - start_time) * 1000)
+        )
+        
+    except Exception as e:
+        logger.error(f"FFT analysis error: {e}")
+        raise HTTPException(status_code=500, detail=f"FFT analysis error: {str(e)}")
+
+@app.post("/api/v1/analysis/validate-features", response_model=FFTComparisonResponse)
+async def validate_features(file: UploadFile = File(...)):
+    """
+    Validate ML-extracted features against MATLAB FFT analysis.
+    
+    Compares:
+    - Hand-crafted features (librosa) vs MATLAB FFT features
+    - Spectral centroid correlation
+    - Energy validation (Parseval's theorem)
+    
+    Args:
+        file: Audio file (MP3, WAV, FLAC, etc.)
+        
+    Returns:
+        Comparison of FFT and ML features with correlation metrics
+    """
+    if not matlab_interface:
+        raise HTTPException(status_code=503, detail="MATLAB interface not available")
+    
+    if not file.filename.lower().endswith(('.mp3', '.wav', '.flac', '.ogg', '.au')):
+        raise HTTPException(status_code=400, detail="Unsupported file format")
+    
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=Path(file.filename).suffix) as tmp:
+            content = await file.read()
+            if len(content) > MAX_FILE_SIZE:
+                raise HTTPException(status_code=400, detail="File too large (max 50MB)")
+            tmp.write(content)
+            tmp_path = tmp.name
+        
+        # Load audio
+        audio, sr = feature_service.load_audio(tmp_path)
+        
+        # Extract hand-crafted features
+        features_array = feature_service.extract_hand_crafted_features(tmp_path)
+        
+        # Create feature dict (simplified - map to known indices)
+        ml_features = {
+            'spectral_centroid': float(features_array[2]) if len(features_array) > 2 else None,
+            'spectral_rolloff': float(features_array[6]) if len(features_array) > 6 else None,
+            'zero_crossing_rate': float(features_array[8]) if len(features_array) > 8 else None
+        }
+        
+        # Run FFT analysis
+        fft_results = matlab_interface.run_fft_analysis(audio, sr)
+        
+        # Compare features
+        comparison = matlab_interface.validate_fft_vs_ml_features(fft_results, ml_features)
+        
+        Path(tmp_path).unlink()
+        
+        return FFTComparisonResponse(
+            fft_analysis=comparison['fft'],
+            ml_features=comparison['ml'],
+            correlation=comparison['correlation'],
+            filename=file.filename
+        )
+        
+    except Exception as e:
+        logger.error(f"Feature validation error: {e}")
+        raise HTTPException(status_code=500, detail=f"Feature validation error: {str(e)}")
+
+# ============================================================================
+# Run Server
 # ============================================================================
 
 if __name__ == "__main__":
-    import argparse
-    
-    parser = argparse.ArgumentParser(description="Music Genre Classification API Server")
-    parser.add_argument("--host", default="0.0.0.0", help="Host to bind to")
-    parser.add_argument("--port", type=int, default=8000, help="Port to bind to")
-    parser.add_argument("--reload", action="store_true", help="Enable auto-reload")
-    
-    args = parser.parse_args()
-    
-    print(f"\nStarting {config.APP_NAME} v{config.VERSION}")
-    print(f"API Documentation: http://{args.host}:{args.port}/docs")
-    print(f"Health Check: http://{args.host}:{args.port}/health\n")
-    
+    print("\nStarting Music Genre Classification API (CNN)...")
+    print("Access API docs at: http://localhost:8000/docs\n")
+
     uvicorn.run(
-        "app:app",
-        host=args.host,
-        port=args.port,
-        reload=args.reload,
+        app,
+        host="0.0.0.0",
+        port=8000,
         log_level="info"
     )
