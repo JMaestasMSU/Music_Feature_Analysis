@@ -12,6 +12,7 @@ Goal: Find optimal strategy to balance precision and recall.
 import numpy as np
 import torch
 import json
+import yaml
 from pathlib import Path
 from sklearn.metrics import (
     hamming_loss,
@@ -23,21 +24,53 @@ import seaborn as sns
 
 # Paths
 PROJECT_ROOT = Path(__file__).parent.parent
-MODEL_DIR = PROJECT_ROOT / "models" / "trained_models" / "multilabel_cnn_70genres_20251203_113316"
+MODEL_DIR = PROJECT_ROOT / "models" / "trained_models" / "multilabel_cnn_filtered_improved"
 DATA_DIR = PROJECT_ROOT / "data" / "processed"
 
-# Load model and data to get predictions
-print("Loading model and test data...")
+print("="*80)
+print(f"THRESHOLD TUNING: {MODEL_DIR.name}")
+print("="*80)
 
-# Load genre names
-with open(DATA_DIR / "genre_names_70.json", 'r') as f:
-    genre_names = json.load(f)
+# Load model configuration
+config_path = MODEL_DIR / "config.yaml"
+if config_path.exists():
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+    print(f"Loaded config: {config.get('base_channels', 96)} channels, min_samples={config.get('min_samples_per_genre', 0)}")
+else:
+    print(f"WARNING: No config.yaml found, using defaults")
+    config = {'base_channels': 96, 'use_attention': True}
+
+# Load genre names - try model directory first
+genre_names_path = MODEL_DIR / "genre_names.json"
+if genre_names_path.exists():
+    with open(genre_names_path, 'r') as f:
+        genre_names = json.load(f)
+    print(f"Loaded {len(genre_names)} genres from model directory")
+else:
+    print(f"WARNING: No genre_names.json in model dir, using full 70 genres")
+    with open(DATA_DIR / "genre_names_70.json", 'r') as f:
+        genre_names = json.load(f)
 
 # Load test data
+print("\nLoading test data...")
 spectrograms = np.load(DATA_DIR / "spectrograms.npy")
 labels = np.load(DATA_DIR / "labels_multilabel.npy")
 
-print(f"Loaded dataset: {spectrograms.shape[0]} samples, {len(genre_names)} genres")
+print(f"Full dataset: {spectrograms.shape[0]} samples, {labels.shape[1]} genres")
+
+# Filter labels to match model's genres if needed
+if labels.shape[1] != len(genre_names):
+    print(f"Filtering labels from {labels.shape[1]} to {len(genre_names)} genres...")
+
+    # Load full genre list to create mapping
+    with open(DATA_DIR / "genre_names_70.json", 'r') as f:
+        full_genres = json.load(f)
+
+    # Create index mapping
+    genre_indices = [full_genres.index(g) for g in genre_names if g in full_genres]
+    labels = labels[:, genre_indices]
+    print(f"Filtered labels to {labels.shape[1]} genres")
 
 # Create test split (same as training: 60/20/20)
 n_samples = len(spectrograms)
@@ -48,10 +81,15 @@ np.random.seed(42)
 indices = np.random.permutation(n_samples)
 test_idx = indices[n_train + n_val:]
 
-X_test = spectrograms[test_idx]
-y_true = labels[test_idx]
+X_test_full = spectrograms[test_idx]
+y_true_full = labels[test_idx]
 
-print(f"Test set: {len(X_test)} samples")
+# Remove samples with no labels after filtering
+valid_mask = y_true_full.sum(axis=1) > 0
+X_test = X_test_full[valid_mask]
+y_true = y_true_full[valid_mask]
+
+print(f"Test set: {len(X_test)} samples (filtered from {len(X_test_full)} to remove unlabeled)")
 
 # Load model
 print("Loading trained model...")
@@ -60,35 +98,110 @@ sys.path.append(str(PROJECT_ROOT / "models"))
 from cnn_model import MultiLabelAudioCNN
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = MultiLabelAudioCNN(num_genres=len(genre_names), base_channels=96, use_attention=True).to(device)
+print(f"Using device: {device}")
 
-# Load checkpoint (contains model_state_dict + metadata)
-checkpoint = torch.load(MODEL_DIR / "best_model.pt", map_location=device)
+# Clear CUDA cache
+if device.type == 'cuda':
+    torch.cuda.empty_cache()
+    print(f"CUDA device: {torch.cuda.get_device_name(0)}")
+
+# Load checkpoint FIRST to get exact architecture
+checkpoint_path = MODEL_DIR / "best_model.pt"
+print(f"Loading checkpoint from: {checkpoint_path}")
+checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
+
+# Get architecture parameters from checkpoint AND config
+num_genres_checkpoint = checkpoint.get('num_genres', len(genre_names))
+base_channels = config.get('base_channels', 96)  # Read from config!
+use_attention = config.get('use_attention', True)
+
+print(f"Model architecture from config:")
+print(f"  Genres: {num_genres_checkpoint}")
+print(f"  Base channels: {base_channels}")
+print(f"  Attention: {use_attention}")
+
+# Verify genre count matches
+if num_genres_checkpoint != len(genre_names):
+    print(f"WARNING: Checkpoint has {num_genres_checkpoint} genres, but loaded {len(genre_names)} genre names")
+    print(f"Using checkpoint value: {num_genres_checkpoint} genres")
+    genre_names = genre_names[:num_genres_checkpoint]
+
+# Create model with correct architecture
+print("Creating model...")
+model = MultiLabelAudioCNN(
+    num_genres=num_genres_checkpoint,
+    base_channels=base_channels,
+    use_attention=use_attention
+)
+
+# Load state dict BEFORE moving to GPU
+print("Loading model weights...")
 model.load_state_dict(checkpoint['model_state_dict'])
 model.eval()
 
-print(f"Model loaded on {device}")
-print(f"Checkpoint info: epoch {checkpoint['epoch']}, val_F1={checkpoint['val_f1']:.4f}")
+
+eval_device = torch.device('cuda')
+
+model = model.to(eval_device)
+
+# Clear checkpoint from memory
+del checkpoint
+if device.type == 'cuda':
+    torch.cuda.empty_cache()
+
+print(f"Model loaded successfully on {eval_device}")
 
 # Get predictions (probabilities)
-print("Generating predictions...")
+print("\nGenerating predictions...")
+
+# Validate data first
+print(f"Data validation:")
+print(f"  X_test shape: {X_test.shape}")
+print(f"  X_test dtype: {X_test.dtype}")
+print(f"  X_test range: [{X_test.min():.3f}, {X_test.max():.3f}]")
+print(f"  Has NaN: {np.isnan(X_test).any()}")
+print(f"  Has Inf: {np.isinf(X_test).any()}")
+
+# Check for invalid data
+if np.isnan(X_test).any() or np.isinf(X_test).any():
+    print("ERROR: Data contains NaN or Inf values!")
+    # Clean the data
+    X_test = np.nan_to_num(X_test, nan=0.0, posinf=1.0, neginf=0.0)
+    print("  Cleaned invalid values")
 
 # Process in batches to avoid memory issues
-batch_size = 32
+batch_size = 16  # Reduced from 32 for safety
 y_probs_list = []
+
+print(f"\nProcessing {len(X_test)} samples in batches of {batch_size}...")
 
 with torch.no_grad():
     for i in range(0, len(X_test), batch_size):
         batch = X_test[i:i+batch_size]
+
         # Add channel dimension: [batch, height, width] -> [batch, 1, height, width]
-        batch_tensor = torch.FloatTensor(batch).unsqueeze(1).to(device)
+        batch_tensor = torch.FloatTensor(batch).unsqueeze(1)
+
+        # Move to eval device (CPU)
+        batch_tensor = batch_tensor.to(eval_device)
+
+        # Forward pass
         outputs = model(batch_tensor)
         probs = torch.sigmoid(outputs).cpu().numpy()
         y_probs_list.append(probs)
 
+        # Clean up
+        del batch_tensor, outputs
+
+        # Progress
+        if i % 160 == 0:
+            print(f"  Processed {i+len(batch)}/{len(X_test)}...")
+
 y_probs = np.vstack(y_probs_list)
 
-print(f"Probability range: [{y_probs.min():.3f}, {y_probs.max():.3f}]")
+print(f"\nPredictions generated successfully!")
+print(f"  Shape: {y_probs.shape}")
+print(f"  Probability range: [{y_probs.min():.3f}, {y_probs.max():.3f}]")
 
 
 def evaluate_predictions(y_true, y_pred):
@@ -176,7 +289,7 @@ for thresh in thresholds:
 
 # Find best threshold
 best_thresh = max(threshold_results, key=lambda x: x['f1_macro'])
-print(f"\n✓ Best threshold: {best_thresh['threshold']:.2f} (F1={best_thresh['f1_macro']:.4f})")
+print(f"\nBest threshold: {best_thresh['threshold']:.2f} (F1={best_thresh['f1_macro']:.4f})")
 
 
 print("\n" + "="*80)
@@ -200,7 +313,7 @@ for k in k_values:
     print(f"  Avg preds: {metrics['avg_predictions']:.1f} genres/track")
 
 best_k = max(topk_results, key=lambda x: x['f1_macro'])
-print(f"\n✓ Best K: {best_k['k']} (F1={best_k['f1_macro']:.4f})")
+print(f"\nBest K: {best_k['k']} (F1={best_k['f1_macro']:.4f})")
 
 
 print("\n" + "="*80)
@@ -231,7 +344,7 @@ for thresh, k in test_combos:
     print(f"  Avg preds: {metrics['avg_predictions']:.1f} genres/track")
 
 best_combo = max(combo_results, key=lambda x: x['f1_macro'])
-print(f"\n✓ Best combo: threshold={best_combo['threshold']:.2f}, K={best_combo['k']} (F1={best_combo['f1_macro']:.4f})")
+print(f"\nBest combo: threshold={best_combo['threshold']:.2f}, K={best_combo['k']} (F1={best_combo['f1_macro']:.4f})")
 
 
 print("\n" + "="*80)
@@ -286,7 +399,7 @@ tuning_summary = {
 with open(output_file, 'w') as f:
     json.dump(tuning_summary, f, indent=2)
 
-print(f"\n✓ Results saved to: {output_file.relative_to(PROJECT_ROOT)}")
+print(f"\nResults saved to: {output_file.relative_to(PROJECT_ROOT)}")
 
 
 # Create visualization
@@ -365,7 +478,7 @@ ax.grid(True, alpha=0.3, axis='y')
 plt.tight_layout()
 plot_file = MODEL_DIR / "threshold_tuning_plots.png"
 plt.savefig(plot_file, dpi=150, bbox_inches='tight')
-print(f"✓ Plots saved to: {plot_file.relative_to(PROJECT_ROOT)}")
+print(f"Plots saved to: {plot_file.relative_to(PROJECT_ROOT)}")
 
 print("\n" + "="*80)
 print("THRESHOLD TUNING COMPLETE")
